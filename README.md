@@ -82,6 +82,42 @@ just install
 
 **Trying a build without touching your setup:** set `HERDR_APP_HOME` to an empty folder and `HC_SESSION` to a new name before running it. Otherwise it opens a second window on your real setup.
 
+## Subscription quota (separate, optional mod)
+
+A foldable sidebar section showing how much of each coding-agent subscription you've used, and when it resets. It lists only subscriptions that are installed in Herdr and logged in, and only the windows each service reports.
+
+![The quota section, with 5-hour and weekly rows for Claude and weekly rows for Codex and Grok](preview-quota.png)
+
+- Supports Claude, Codex and Grok subscriptions. API keys don't count.
+- Checks every 5 minutes, except while folded. The refresh icon checks at once.
+- Click the header to fold or open it.
+- **The interface is Traditional Chinese only.** Tested on Windows 11 with Herdr 0.1.12.
+
+**It reads your agents' login tokens and sends them over the network, unlike the chat box.** Read this before installing:
+
+| Login file it reads | The only place that token is sent |
+|---|---|
+| `~/.claude/.credentials.json` | `api.anthropic.com` |
+| `~/.codex/auth.json` | `chatgpt.com` |
+| `~/.grok/auth.json` | `cli-chat-proxy.grok.com` |
+
+- **It never stores or refreshes a token.** It saves only percentages, plan names, reset times and icon paths, in its own `localStorage`.
+- **When a token expires,** the row dims and keeps its last numbers. Opening that agent renews the token, and the next check recovers.
+- **These usage endpoints aren't public APIs.** A service can change or block them at any time, and using them may not be something it supports. Use this at your own risk.
+
+**Install:** `layouts/main-chat.json` doesn't include this mod, so you add it yourself.
+
+1. Copy `mods/quota` to `~/.config/herdr-app/mods/`.
+2. In your layout's `sidebar`, add this block right before `sidebar-footer`:
+
+   ```json
+   { "id": "quota", "type": "block", "size": { "px": 134 }, "content": { "mod": "quota", "props": { "fit_block": "quota" } } }
+   ```
+
+3. Run `herdr-app check` on the mod folder.
+
+To remove it, delete the block and the folder. See [RECIPE-quota.md](RECIPE-quota.md) for the full brief.
+
 ## Tests
 
 ```sh
@@ -131,3 +167,32 @@ node --test "test/*.test.mjs"
 - 權限對話框和選單會照常完整顯示。在該終端機打字時，文字會移到訊息框。
 - **`just install` 會覆蓋已安裝的 Herdr，請先備份。** 這個 patch 是針對上述 commit 製作的，新版 Herdr 可能要調整；Herdr 更新後也可能要重新套用和編譯。
 - 想還原，重新安裝官方版即可，官方版會忽略 `message_box`。
+
+### 訂閱額度（獨立的選用 MOD）
+
+側欄裡可以收合的區塊，顯示各個程式代理訂閱用了多少額度、何時重置。只會列出已安裝到 Herdr 且已登入的訂閱，也只顯示該服務回報的時段。
+
+- 支援 Claude、Codex、Grok 的訂閱，API key 不算。
+- 每 5 分鐘查詢一次，收合時不查詢。按重新整理圖示會立刻查詢。
+- 點標題列可以收合或展開。
+- 介面只有繁體中文。已在 Windows 11 和 Herdr 0.1.12 上測試。
+
+**這個 MOD 和訊息框不同，它會讀取代理程式的登入憑證並透過網路送出。** 安裝前請先看過：
+
+| 讀取的登入檔 | 憑證只會送到 |
+|---|---|
+| `~/.claude/.credentials.json` | `api.anthropic.com` |
+| `~/.codex/auth.json` | `chatgpt.com` |
+| `~/.grok/auth.json` | `cli-chat-proxy.grok.com` |
+
+- **不會儲存或更新憑證。** 它只把百分比、方案名稱、重置時間和圖示路徑存在自己的 `localStorage`。
+- **憑證過期時，** 那一列會變暗並保留上次的數字。開啟該代理程式會更新憑證，下次查詢就會恢復。
+- **這些查詢端點都不是公開 API。** 服務隨時可能更改或封鎖，也不一定支援這種用法，請自行評估風險。
+
+**安裝：** `layouts/main-chat.json` 沒有包含這個 MOD，需要自己加入。
+
+1. 把 `mods/quota` 複製到 `~/.config/herdr-app/mods/`。
+2. 在版面的 `sidebar` 裡，把上方英文說明的區塊 JSON 加到 `sidebar-footer` 前面。
+3. 對 mod 資料夾執行 `herdr-app check`。
+
+要移除時，刪掉該區塊和資料夾即可。
