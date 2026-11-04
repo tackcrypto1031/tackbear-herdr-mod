@@ -1,0 +1,361 @@
+diff --git a/defaults/AGENTS.md b/defaults/AGENTS.md
+index 4143cee..e910850 100644
+--- a/defaults/AGENTS.md
++++ b/defaults/AGENTS.md
+@@ -334,6 +334,12 @@ layout's look and a block can differ:
+   terminal columns do not change. Hidden in alternate-screen programs.
+ - `terminal_opacity` (0..1): below 1, the background behind a terminal
+   (a pane frame's, the layout's gradient) shows through its text.
++- `message_box` (root, a mod's name): for a layout whose mod replaces coding
++  agents' own input boxes. Herdr hides the box of Claude Code, Codex or Grok
++  when its screen shows one, gives the program spare rows below the pane so
++  nothing above is lost, and delivers text typed in that terminal to the mod's
++  `nextCommand()` as `type:<text>`. Anything else on that screen (a permission
++  dialog, a picker, another program) stays fully visible.
+ - Switching layouts switches the look. The theme menu changes the shown
+   layout's root `theme`.
+ - Today only the root's look applies; a block's own look is coming.
+diff --git a/src/agent_input.rs b/src/agent_input.rs
+new file mode 100644
+index 0000000..9754a06
+--- /dev/null
++++ b/src/agent_input.rs
+@@ -0,0 +1,144 @@
++//! Finds the input box a coding agent draws at the bottom of its screen, for
++//! layouts whose own message box replaces it (`message_box`).
++//!
++//! Only an exact match hides anything. A permission dialog, a picker, or a
++//! program this doesn't know matches nothing and stays fully on screen, so
++//! something the person must answer can't end up hidden.
++
++/// How far up from the last line with text a box's footer may be.
++const FOOTER_ROWS: usize = 4;
++/// How many rows a box may take, wrapped input included.
++const BOX_ROWS: usize = 16;
++/// The rows searched, counted up from the screen's bottom.
++pub const SEARCHED_ROWS: usize = FOOTER_ROWS + BOX_ROWS + 12;
++
++/// The first row of the agent's input box in `rows` (a screen's text, top to
++/// bottom), or None when no known box is there.
++pub fn find(rows: &[String]) -> Option<usize> {
++    let last = rows.iter().rposition(|r| !r.trim().is_empty())?;
++    claude(rows, last).or_else(|| codex(rows, last)).or_else(|| grok(rows, last))
++}
++
++/// A full-width rule, the `❯` prompt, more input, and a closing rule, with
++/// Claude Code's mode line under it.
++fn claude(rows: &[String], last: usize) -> Option<usize> {
++    let close = (last.saturating_sub(FOOTER_ROWS)..=last).rev().find(|&y| is_rule(&rows[y]))?;
++    (close.saturating_sub(BOX_ROWS)..close)
++        .rev()
++        .find(|&y| y + 1 < close && is_rule(&rows[y]) && rows[y + 1].trim_start().starts_with('❯'))
++}
++
++/// Codex's `›` prompt over its status lines. Its pickers use `›` as well, with
++/// a footer of their own, so the footer is what tells them apart: narrow panes
++/// cut its words short and warnings share its line, so it's matched loosely.
++/// The blank line over the prompt is the box's padding.
++fn codex(rows: &[String], last: usize) -> Option<usize> {
++    let footer = &rows[last.saturating_sub(1)..=last];
++    if !footer.iter().any(|r| r.contains("· Context ") || r.contains("? for shortc")) {
++        return None;
++    }
++    let prompt = (last.saturating_sub(BOX_ROWS)..last).rev().find(|&y| rows[y].trim_start().starts_with('›'))?;
++    Some(if prompt > 0 && rows[prompt - 1].trim().is_empty() { prompt - 1 } else { prompt })
++}
++
++/// Grok's rounded box with `❯` inside. Under it comes its lower border, carrying
++/// the model as `Grok 4.7 (high)`, or in a short pane only its key hints.
++fn grok(rows: &[String], last: usize) -> Option<usize> {
++    let open = (last.saturating_sub(FOOTER_ROWS + BOX_ROWS)..=last).rev().find(|&y| rows[y].trim_start().starts_with('╭'))?;
++    if !rows.get(open + 1)?.trim_start().starts_with("│ ❯") {
++        return None;
++    }
++    rows[open + 2..=last]
++        .iter()
++        .any(|r| (r.trim_start().starts_with('╰') && r.contains('(') && r.contains(')')) || r.contains("Ctrl+x:shortcuts"))
++        .then_some(open)
++}
++
++fn is_rule(row: &str) -> bool {
++    let row = row.trim();
++    row.chars().count() >= 20 && row.chars().all(|c| c == '─')
++}
++
++#[cfg(test)]
++mod tests {
++    use super::find;
++
++    fn screen(text: &str) -> Vec<String> {
++        text.lines().map(str::to_owned).collect()
++    }
++
++    fn rule() -> String {
++        "─".repeat(60)
++    }
++
++    #[test]
++    fn claude_box_starts_at_its_upper_rule() {
++        let rows = screen(&format!("● done\n\n{r}\n❯ \n{r}\n  ⏵⏵ auto mode on (shift+tab to cycle)\n\n", r = rule()));
++        assert_eq!(find(&rows), Some(2));
++    }
++
++    #[test]
++    fn claude_box_keeps_wrapped_input_inside() {
++        let rows = screen(&format!("● done\n{r}\n❯ first line\n  second line\n{r}\n  footer", r = rule()));
++        assert_eq!(find(&rows), Some(1));
++    }
++
++    #[test]
++    fn claude_dialogs_and_pickers_stay_visible() {
++        let permission = format!("● Bash(rm x)\n{r}\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n{r}", r = rule());
++        assert_eq!(find(&screen(&permission)), None);
++        let picker = "▔▔▔▔▔▔▔▔\n Select model\n ❯ 5. Haiku 5.5 ✔\n Enter to set as default · s to use this session only · Esc to cancel";
++        assert_eq!(find(&screen(picker)), None);
++    }
++
++    #[test]
++    fn codex_box_starts_at_the_padding_over_its_prompt() {
++        let rows = screen("• answer\n\n› Ask Codex to do anything\n\n  GPT-6.1 Terra high · Context 100% left\n  ← for agents · ? for shortcuts\n");
++        assert_eq!(find(&rows), Some(1));
++    }
++
++    #[test]
++    fn codex_box_is_found_when_a_narrow_pane_cuts_its_footer_short() {
++        let rows = screen("• answer\n\n› Ask Codex to do anything\n\n  GPT-6.1 Terra high · Context 100% left · 0 in · 0 out …\n  ← for agents · ? for shortc  ⚠ 4 warnings · f2 to view");
++        assert_eq!(find(&rows), Some(1));
++    }
++
++    #[test]
++    fn codex_picker_stays_visible() {
++        let rows = screen("  Select Model and Effort\n› 3. GPT-6.1 Terra (current)\n  4. GPT-6-Sol\n  enter select · esc back");
++        assert_eq!(find(&rows), None);
++    }
++
++    #[test]
++    fn grok_box_starts_at_its_top_border_and_a_picker_above_it_stays() {
++        let rows = screen("  ❯ Grok 4.7 (current)\n  Grok 4.6\n  ╭──────╮\n  │ ❯    │\n  ╰── Grok 4.7 (high) · always-approve ─╯\n  Shift+Tab:mode  │  Ctrl+x:shortcuts");
++        assert_eq!(find(&rows), Some(2));
++    }
++
++    #[test]
++    fn grok_box_is_found_whatever_sits_under_it() {
++        let rows = screen("  Read Terms and Privacy Policy.\n\n  ╭──────╮\n  │ ❯    │\n  ╰── Grok 4.5 (high) · always-approve ─╯\n\n     Grok Build  1.0.70 [stable]");
++        assert_eq!(find(&rows), Some(2));
++    }
++
++    #[test]
++    fn grok_box_is_found_when_a_short_pane_drops_its_lower_border() {
++        let rows = screen(" Read Terms and Privacy Policy.\n ╭──────╮\n │ ❯    │\n Ctrl+x:shortcuts");
++        assert_eq!(find(&rows), Some(1));
++    }
++
++    #[test]
++    fn a_box_grok_is_only_starting_to_draw_stays_visible() {
++        assert_eq!(find(&screen(" ╭──────╮\n │ ❯    │")), None);
++        assert_eq!(find(&screen(" ╭──────╮")), None);
++    }
++
++    #[test]
++    fn other_programs_keep_every_row() {
++        assert_eq!(find(&screen("PS D:\\Herdr> dir\n❯ git status\n")), None);
++        // A table an agent printed has box drawing, not its prompt.
++        assert_eq!(find(&screen("╭────╮\n│ a  │\n╰────╯\nnext line")), None);
++        assert_eq!(find(&screen(&format!("{r}\nheading\n{r}", r = rule()))), None);
++        assert_eq!(find(&[]), None);
++    }
++}
+diff --git a/src/layout.rs b/src/layout.rs
+index 557cbc7..59964e9 100644
+--- a/src/layout.rs
++++ b/src/layout.rs
+@@ -171,6 +171,10 @@ pub struct Look {
+     /// 0..1: below 1, what's behind a terminal shows through its background.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub terminal_opacity: Option<f32>,
++    /// A mod that replaces coding agents' own input boxes: they're hidden
++    /// while their terminals show, and typing there goes to this mod.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub message_box: Option<String>,
+ }
+ 
+ /// A layout's theme: one name, or a pair the system's appearance (or the
+diff --git a/src/main.rs b/src/main.rs
+index 6f7847c..feb9b12 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -1,6 +1,7 @@
+ // Windows: a window app, no console of its own (see `attach_console`).
+ #![cfg_attr(windows, windows_subsystem = "windows")]
+ 
++mod agent_input;
+ mod bench;
+ mod commands;
+ mod control;
+diff --git a/src/settings.rs b/src/settings.rs
+index 05fe16a..620313b 100644
+--- a/src/settings.rs
++++ b/src/settings.rs
+@@ -491,6 +491,8 @@ pub struct Settings {
+     pub terminal_padding: [f32; 2],
+     /// 0..1: below 1, what's behind a terminal shows through.
+     pub terminal_opacity: f32,
++    /// The layout's mod that replaces coding agents' own input boxes.
++    pub message_box: Option<String>,
+     pub clipboard_write: bool,
+     pub minimum_contrast: f32,
+     pub option_as_alt: OptionAsAlt,
+@@ -533,6 +535,7 @@ impl Default for Settings {
+             pane_scrollbars: true,
+             terminal_padding: [10.0, 6.0],
+             terminal_opacity: 1.0,
++            message_box: None,
+             clipboard_write: true,
+             minimum_contrast: 1.0,
+             option_as_alt: OptionAsAlt::Auto,
+@@ -571,6 +574,7 @@ impl Settings {
+             pane_scrollbars: person.pane_scrollbars,
+             terminal_padding: look.terminal_padding.unwrap_or(d.terminal_padding),
+             terminal_opacity: look.terminal_opacity.unwrap_or(1.0).clamp(0.0, 1.0),
++            message_box: look.message_box.clone(),
+             sounds: person.sounds.clone(),
+             clipboard_write: person.clipboard_write,
+             minimum_contrast: person.minimum_contrast,
+diff --git a/src/terminal.rs b/src/terminal.rs
+index 488114a..8ce6f22 100644
+--- a/src/terminal.rs
++++ b/src/terminal.rs
+@@ -52,6 +52,11 @@ pub enum TerminalEvent {
+ /// What the canvas closures need, shared outside the entity so prepaint can resize.
+ struct Grid {
+     vt: Vt,
++    /// Rows the program has below the pane's edge, room for the input box a
++    /// layout's message box replaces (`message_box`). Zero everywhere else.
++    hidden_rows: u16,
++    /// Where that input box starts, while one is on screen and hidden.
++    input_row: Option<u16>,
+     core: Arc<Core>,
+     channel: Option<u32>,
+     cell: Size<Pixels>,
+@@ -179,6 +184,7 @@ impl Grid {
+         self.cell = cell;
+         self.scale = scale;
+         let dev = device_cell(cell, scale);
++        let rows = rows.saturating_add(self.hidden_rows);
+         // Before the size, so a program woken by it asks for the new cell.
+         self.refresh_theme(&vt::theme(), dev);
+         if (cols, rows) == (self.vt.cols, self.vt.rows) && dev == self.vt_cell {
+@@ -247,6 +253,8 @@ impl TerminalView {
+                 hover: None,
+                 link_spans: Vec::new(),
+                 marked: None,
++                hidden_rows: 0,
++                input_row: None,
+                 cursor_at: None,
+                 thumb: None,
+                 track: None,
+@@ -757,6 +765,14 @@ impl TerminalView {
+             return;
+         }
+         let k = &ev.keystroke;
++        let plain = !k.modifiers.control && !k.modifiers.alt && !k.modifiers.platform;
++        if plain
++            && let Some(text) = k.key_char.as_deref().filter(|t| !t.chars().any(char::is_control))
++            && self.type_in_message_box(text)
++        {
++            cx.stop_propagation();
++            return;
++        }
+         // Typing clears a selection, as in Herdr.
+         if !k.key.starts_with("shift") && !k.key.starts_with("control") && !k.key.starts_with("alt") {
+             self.grid.borrow_mut().vt.clear_selection();
+@@ -768,6 +784,16 @@ impl TerminalView {
+         }
+     }
+ 
++    /// Text typed into a hidden input box would pile up unseen and go out with
++    /// the next message, so it moves to the message box that replaced it.
++    fn type_in_message_box(&self, text: &str) -> bool {
++        if self.grid.borrow().input_row.is_none() {
++            return false;
++        }
++        let Some(message_box) = crate::settings::get().message_box.clone() else { return false };
++        crate::mods::send_command(&message_box, &format!("type:{text}"))
++    }
++
+     fn scroll(&mut self, ev: &ScrollWheelEvent, _w: &mut Window, cx: &mut Context<Self>) {
+         cx.stop_propagation();
+         let mut g = self.grid.borrow_mut();
+@@ -1540,14 +1566,32 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
+     let mut g = grid.borrow_mut();
+     let cell = g.cell;
+     let (pad_x, pad_y) = pad();
++    let frame = g.vt.frame();
++    let hides_input = crate::settings::get().message_box.is_some();
++    g.input_row = if hides_input { hidden_input_row(&frame.rows) } else { None };
++    // The first box seen makes room for itself; the program redraws at the new size.
++    let hidden_rows = if !hides_input { 0 } else if g.input_row.is_some() { HIDDEN_ROWS } else { g.hidden_rows };
++    if hidden_rows != g.hidden_rows {
++        g.hidden_rows = hidden_rows;
++        window.request_animation_frame();
++    }
++    let shown_rows = g.vt.rows.saturating_sub(g.hidden_rows);
+     // Rows rarely fill the height exactly: split what's left above and below.
+-    let spare = (f32::from(bounds.size.height) - 2.0 * pad_y - f32::from(cell.height) * g.vt.rows as f32).max(0.0);
++    let spare = (f32::from(bounds.size.height) - 2.0 * pad_y - f32::from(cell.height) * shown_rows as f32).max(0.0);
+     let scale = window.scale_factor();
+     let snap = |v: Pixels| px((f32::from(v) * scale).round() / scale);
+-    let origin = bounds.origin + point(px(pad_x), px(pad_y + (spare / 2.0).floor()));
++    // With a box hidden, the rows over it reach the pane's bottom. With none,
++    // the screen's real bottom does, so a dialog there is on screen in full.
++    let lifted = g.input_row.map_or(g.hidden_rows, |y| y.saturating_sub(shown_rows));
++    let origin = bounds.origin + point(px(pad_x), px(pad_y + (spare / 2.0).floor()) - cell.height * lifted as f32);
+     let origin = point(snap(origin.x), snap(origin.y));
+     g.origin = origin;
+-    let frame = g.vt.frame();
++    let clip = (g.hidden_rows > 0).then(|| {
++        // Rows lifted past the top would otherwise show cut in half in the padding.
++        let top = if lifted > 0 { (origin.y + cell.height * lifted as f32).max(bounds.origin.y) } else { bounds.origin.y };
++        let bottom = g.input_row.map_or(bounds.bottom(), |y| (origin.y + cell.height * y as f32).min(bounds.bottom()));
++        ContentMask { bounds: Bounds::new(point(bounds.origin.x, top), size(bounds.size.width, (bottom - top).max(px(0.0)))) }
++    });
+     let placements = g.vt.placements();
+     let mut images: Vec<(bool, Bounds<Pixels>, Arc<RenderImage>)> = Vec::new();
+     let mut keep = std::collections::HashSet::new();
+@@ -1579,6 +1623,7 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
+     drop(g);
+ 
+     window.paint_quad(fill(bounds, hsla(frame.bg).opacity(crate::settings::get().terminal_opacity)));
++    window.with_content_mask(clip, |window| {
+     let at = |x: usize, y: usize| origin + point(cell.width * x as f32, cell.height * y as f32);
+     // Edges round to device pixels, so cells side by side meet without seams.
+     let snap_box = |b: Bounds<Pixels>| {
+@@ -1751,6 +1796,19 @@ fn paint_grid(bounds: Bounds<Pixels>, grid: &Rc<RefCell<Grid>>, focused: bool, w
+             g.track = Some(lane);
+         }
+     }
++    });
++}
++
++/// Rows kept below the pane once an agent's input box is hidden. A box this
++/// tall or smaller takes no rows from what's shown over it.
++const HIDDEN_ROWS: u16 = 6;
++
++/// Where a known agent's input box starts on this screen.
++fn hidden_input_row(rows: &[Rc<Vec<vt::Cell>>]) -> Option<u16> {
++    let first = rows.len().saturating_sub(crate::agent_input::SEARCHED_ROWS);
++    // A cell the program skipped over instead of writing a space to has no text.
++    let text: Vec<String> = rows[first..].iter().map(|row| row.iter().map(|c| if c.text.is_empty() { " " } else { c.text.as_str() }).collect()).collect();
++    crate::agent_input::find(&text).map(|y| (first + y) as u16)
+ }
+ 
+ /// OS text input (AltGr, Pinyin, Japanese, Korean, dead keys) types here.
+@@ -1784,7 +1842,7 @@ impl EntityInputHandler for TerminalView {
+         // While the find field holds the keys, the input-method path must not
+         // be a way around that (see `key_down`); with the terminal focused,
+         // input methods type into the program as usual.
+-        if !self.find_field_focused(window, cx) {
++        if !self.find_field_focused(window, cx) && !self.type_in_message_box(text) {
+             self.send(text.as_bytes());
+         }
+         cx.notify();
