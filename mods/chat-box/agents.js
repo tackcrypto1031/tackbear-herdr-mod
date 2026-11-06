@@ -132,7 +132,16 @@ const claude = {
     await io.sleep(SETTLE_MS);
     await walkToModel(io, model.id);
     await io.keys("s");
-    await waitFor(io, (s) => tail(s).includes(`Set model to ${model.id}`), t("wait.result"));
+    // A conversation cached for the old model first asks "Switch model?", with
+    // "1. Yes, switch to <model>" and "2. No, go back". 1 picks yes; it doesn't save a default.
+    const asking = (s) => tail(s).includes(`Yes, switch to ${model.id}`);
+    const screen = await waitFor(io, (s) => asking(s) || tail(s).includes(`Set model to ${model.id}`), t("wait.result"))
+      .catch((error) => abandon(io, error));
+    if (asking(screen)) {
+      await io.keys("1");
+      await waitFor(io, (s) => tail(s).includes(`Set model to ${model.id}`), t("wait.result"))
+        .catch((error) => abandon(io, error));
+    }
     return t("switch.session", { what: model.name });
   },
   async setEffort(io, effort) {

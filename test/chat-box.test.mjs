@@ -115,6 +115,16 @@ test("Claude switches for this session only and never presses Enter", async () =
   assert.deepEqual(io.told, ["/model", "up", "s"]);
 });
 
+test("Claude answers yes when a cached conversation asks before switching", async () => {
+  const claude = agentOf({ program: { key: "claude" } });
+  const picker = "Select model\n ❯ 1.  Default (recommended) ✔  Sonnet 5.5 · Efficient\n 2.  Opus 5.5   For complex";
+  const moved = "Select model\n 1.  Default (recommended) ✔  Sonnet 5.5 · Efficient\n ❯ 2.  Opus 5.5   For complex";
+  const ask = "Switch model?\n This conversation is cached for the current model.\n ❯ 1. Yes, switch to Opus 5.5\n 2. No, go back";
+  const io = fakeIo({ "/model": picker, down: moved, s: ask, 1: "⎿  Set model to Opus 5.5 for this session only" });
+  assert.match(await claude.setModel(io, { id: "Opus 5.5", name: "Opus 5.5" }), /this session only/);
+  assert.deepEqual(io.told, ["/model", "down", "s", "1"]);
+});
+
 test("a model the picker doesn't offer leaves it with Esc and changes nothing", async () => {
   const claude = agentOf({ program: { key: "claude" } });
   const io = fakeIo({ "/model": "Select model\n ❯ 5.  Haiku 5.5 ✔   Fast" });
