@@ -1,6 +1,8 @@
 // What each subscription's login file and usage reply mean. No UI and no I/O, so tests can run it.
 // To add a subscription: add an entry to PROVIDERS. `login` returns null when the file holds no
 // subscription login, and `parse` returns no windows when the account has no quota to show.
+// A pay-as-you-go API has no quota, only a balance: its entry names a `helper` script that asks
+// for it (the key lives where the mod can't read it), and its windows carry `amount`, not `percent`.
 
 const WEEK = 604800;
 const FIVE_HOURS = 18000;
@@ -95,7 +97,36 @@ export const PROVIDERS = [
       return { windows: part ? [part] : [] };
     },
   },
+  {
+    key: "deepseek",
+    name: "DeepSeek",
+    agent: "opencode",
+    // Shown when opencode is installed, since that's what uses the key here.
+    program: "opencode",
+    icon: { icon: "icons/dsh-tui.svg", tint: true },
+    helper: "deepseek-balance.mjs",
+    parse(reply) {
+      const infos = (reply?.balance_infos ?? [])
+        .map((info) => ({ currency: info.currency, amount: Number(info.total_balance) }))
+        .filter((info) => info.currency && Number.isFinite(info.amount));
+      // One row per currency holding money; an empty account still shows its first, at zero.
+      const shown = infos.filter((info) => info.amount > 0);
+      const low = reply?.is_available === false;
+      return { windows: (shown.length ? shown : infos.slice(0, 1)).map((info) => ({ label: "餘額", ...info, low, resetsAt: null })) };
+    },
+  },
 ];
+
+const CURRENCY_SIGNS = { CNY: "¥", USD: "$" };
+
+/** "¥10.68"; `short` drops the cents, for the narrow sidebar. */
+export function formatMoney(amount, currency, short = false) {
+  const number = short ? String(Math.floor(amount)) : amount.toFixed(2);
+  const sign = CURRENCY_SIGNS[currency];
+  return sign ? `${sign}${number}` : `${number} ${currency}`;
+}
+
+export const isBalance = (w) => typeof w.amount === "number";
 
 /**
  * What to remember after asking a service, given `outcome`: `{ status, body }`, or `{ failed: true }`
@@ -137,6 +168,6 @@ export const levelOf = (percent) => (percent >= 90 ? "full" : percent >= 70 ? "h
 
 /** The most used window of a subscription, for the narrow sidebar's single number. */
 export const busiestPercent = (entry, now) => {
-  const known = entry.windows.filter((w) => !isPastReset(w, now)).map((w) => w.percent);
+  const known = entry.windows.filter((w) => !isBalance(w) && !isPastReset(w, now)).map((w) => w.percent);
   return known.length ? Math.max(...known) : null;
 };

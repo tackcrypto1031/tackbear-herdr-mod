@@ -1,7 +1,7 @@
 // Run: node --test "test/*.test.mjs"
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PROVIDERS, busiestPercent, formatReset, isPastReset, levelOf, nextEntry } from "../mods/quota/model.js";
+import { PROVIDERS, busiestPercent, formatMoney, formatReset, isPastReset, levelOf, nextEntry } from "../mods/quota/model.js";
 
 const provider = (key) => PROVIDERS.find((p) => p.key === key);
 const NOW = Date.parse("2026-11-04T14:00:00Z");
@@ -85,6 +85,35 @@ test("an expired login or failed request keeps the last numbers, marked as old",
   assert.equal(nextEntry(p, previous, login, { status: 429 }, NOW).state, "failed");
   assert.equal(nextEntry(p, previous, login, { failed: true }, NOW).state, "failed");
   assert.deepEqual(nextEntry(p, null, login, { status: 401 }, NOW).windows, []);
+});
+
+const deepseekReply = (cny, usd = "0.00", available = true) => JSON.stringify({
+  is_available: available,
+  balance_infos: [
+    { currency: "CNY", total_balance: cny, granted_balance: "0.00", topped_up_balance: cny },
+    { currency: "USD", total_balance: usd, granted_balance: "0.00", topped_up_balance: usd },
+  ],
+});
+
+test("DeepSeek shows what's left in each currency holding money", () => {
+  const p = provider("deepseek");
+  const entry = nextEntry(p, null, {}, { status: 200, body: deepseekReply("10.68") }, NOW);
+  assert.deepEqual(entry.windows.map((w) => [w.currency, w.amount, w.low]), [["CNY", 10.68, false]]);
+  assert.deepEqual(p.parse(JSON.parse(deepseekReply("1.00", "2.50"))).windows.map((w) => w.currency), ["CNY", "USD"]);
+  // An empty account still shows, at zero, and is marked when the API stops serving it.
+  const empty = p.parse(JSON.parse(deepseekReply("0.00", "0.00", false))).windows;
+  assert.deepEqual(empty.map((w) => [w.currency, w.amount, w.low]), [["CNY", 0, true]]);
+  assert.equal(nextEntry(p, null, {}, { status: 200, body: "{}" }, NOW), null);
+});
+
+test("a balance reads as money and doesn't count as a used percent", () => {
+  assert.equal(formatMoney(10.68, "CNY"), "¥10.68");
+  assert.equal(formatMoney(0, "USD"), "$0.00");
+  assert.equal(formatMoney(10.68, "CNY", true), "¥10");
+  assert.equal(formatMoney(3, "EUR"), "3.00 EUR");
+  const entry = nextEntry(provider("deepseek"), null, {}, { status: 200, body: deepseekReply("10.68") }, NOW);
+  assert.equal(busiestPercent(entry, NOW), null);
+  assert.equal(isPastReset(entry.windows[0], NOW), false);
 });
 
 test("time to reset reads in the largest useful units", () => {
