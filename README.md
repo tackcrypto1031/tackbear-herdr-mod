@@ -88,7 +88,7 @@ A foldable sidebar section showing how much of each coding-agent subscription yo
 
 ![The quota section, with 5-hour and weekly rows for Claude and weekly rows for Codex and Grok](preview-quota.png)
 
-- Supports Claude, Codex and Grok subscriptions.
+- Supports Claude, Codex and Grok subscriptions. Claude Ultra (formerly Max 20x) has no 5-hour limit, so it shows only the weekly row.
 - **DeepSeek API balance,** for the key opencode uses. A pay-as-you-go API has no quota, so this row shows the money left (`¥10.68`) instead of a bar, and turns red when the account can no longer be used. Listed when opencode is installed and has a DeepSeek key. **Needs Node.js 22.5 or later on your PATH.**
 - Checks every 5 minutes, except while folded. The refresh icon checks at once.
 - Click the header to fold or open it.

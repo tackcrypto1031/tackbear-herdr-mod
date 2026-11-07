@@ -1,6 +1,6 @@
 # Subscription quota
 
-A foldable sidebar section lists how much of each coding-agent subscription you've used. It shows only subscriptions that are installed in Herdr and logged in, and only the time windows each service reports: Claude has a 5-hour and a weekly row, Codex and Grok a weekly row. It also lists what's left on the DeepSeek API account opencode uses.
+A foldable sidebar section lists how much of each coding-agent subscription you've used. It shows only subscriptions that are installed in Herdr and logged in, and only the time windows each service reports: Claude has a 5-hour and a weekly row (Ultra, formerly Max 20x, only the weekly one), Codex and Grok a weekly row. It also lists what's left on the DeepSeek API account opencode uses.
 
 ![Subscription quota](preview-quota.png)
 

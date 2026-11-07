@@ -22,6 +22,24 @@ test("Claude shows both its 5-hour and weekly windows", () => {
   assert.equal(windows[0].resetsAt, Date.parse("2026-11-04T15:59:59.792Z"));
 });
 
+test("Claude Ultra has no 5-hour limit, so only the weekly window shows", () => {
+  const p = provider("claude");
+  const login = p.login(JSON.stringify({ claudeAiOauth: { accessToken: "x", subscriptionType: "ultra", rateLimitTier: "default_claude_ultra" } }));
+  assert.equal(login.plan, "Ultra");
+  const reply = { five_hour: { utilization: 6, resets_at: "2026-11-04T15:00:00Z" }, seven_day: { utilization: 11, resets_at: "2026-11-10T12:00:00Z" } };
+  const entry = nextEntry(p, null, login, { status: 200, body: JSON.stringify(reply) }, NOW);
+  assert.deepEqual(entry.windows.map((w) => w.label), ["週"]);
+  assert.deepEqual(p.parse(reply, p.login(claudeLogin)).windows.map((w) => w.label), ["5H", "週"]);
+});
+
+test("Max 20x is now Ultra: named Ultra, and no 5-hour window", () => {
+  const p = provider("claude");
+  const login = p.login(JSON.stringify({ claudeAiOauth: { accessToken: "x", subscriptionType: "max", rateLimitTier: "default_claude_max_20x" } }));
+  assert.equal(login.plan, "Ultra");
+  const reply = { five_hour: { utilization: 2, resets_at: "2026-11-07T19:20:00Z" }, seven_day: { utilization: 0, resets_at: "2026-11-10T12:00:00Z" } };
+  assert.deepEqual(p.parse(reply, login).windows.map((w) => w.label), ["週"]);
+});
+
 test("Codex shows only the windows the service reports", () => {
   const usage = provider("codex").parse({
     plan_type: "prolite",

@@ -1,6 +1,7 @@
 // What each subscription's login file and usage reply mean. No UI and no I/O, so tests can run it.
 // To add a subscription: add an entry to PROVIDERS. `login` returns null when the file holds no
 // subscription login, and `parse` returns no windows when the account has no quota to show.
+// `parse` also gets what `login` returned, for plans that change which windows count.
 // A pay-as-you-go API has no quota, only a balance: its entry names a `helper` script that asks
 // for it (the key lives where the mod can't read it), and its windows carry `amount`, not `percent`.
 
@@ -47,15 +48,20 @@ export const PROVIDERS = [
       const auth = parseJson(text)?.claudeAiOauth;
       if (!auth?.accessToken || !auth.subscriptionType) return null;
       const multiple = /_(\d+x)$/.exec(auth.rateLimitTier ?? "")?.[1];
+      // Max 20x is now sold as Ultra, though the login file still says `max` / `default_claude_max_20x`.
+      // Ultra has no 5-hour limit, only the weekly one, even though the usage reply still sends `five_hour`.
+      const ultra = /ultra/i.test(`${auth.subscriptionType} ${auth.rateLimitTier ?? ""}`) || (auth.subscriptionType === "max" && multiple === "20x");
       return {
         url: "https://api.anthropic.com/api/oauth/usage",
         headers: { Authorization: `Bearer ${auth.accessToken}`, "anthropic-beta": "oauth-2025-04-20" },
-        plan: [planName(auth.subscriptionType), multiple].filter(Boolean).join(" "),
+        plan: ultra ? "Ultra" : [planName(auth.subscriptionType), multiple].filter(Boolean).join(" "),
+        noFiveHour: ultra,
       };
     },
-    parse(reply) {
+    parse(reply, login) {
       const part = (label, w) => w && windowOf(label, w.utilization, toMs(w.resets_at));
-      return { windows: [part("5H", reply?.five_hour), part("週", reply?.seven_day)].filter(Boolean) };
+      const fiveHour = login?.noFiveHour ? null : part("5H", reply?.five_hour);
+      return { windows: [fiveHour, part("週", reply?.seven_day)].filter(Boolean) };
     },
   },
   {
@@ -135,7 +141,7 @@ export const isBalance = (w) => typeof w.amount === "number";
  */
 export function nextEntry(provider, previous, login, outcome, now) {
   if (outcome.status === 200) {
-    const usage = provider.parse(parseJson(outcome.body));
+    const usage = provider.parse(parseJson(outcome.body), login);
     if (!usage.windows.length) return null;
     return { state: "fresh", plan: login.plan ?? usage.plan ?? null, windows: usage.windows, at: now };
   }
