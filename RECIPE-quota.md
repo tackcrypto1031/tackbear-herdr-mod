@@ -56,7 +56,7 @@ On a sidebar narrower than 160px, the section is a centered chevron, then per su
 - **Some services send more than 3 fractional digits.** Trim them before `Date.parse`.
 - **A copy doesn't start until its block first shows,** so fold inside the mod. Hiding the block with `layout.hide` would stop it from ever coming back after a restart.
 - **Layout `size.height` is scaled by `settings().zoom`:** divide before calling `layout.resize`.
-- **Limits:** the words are Traditional Chinese only. Claude, Codex, Grok and DeepSeek are the only sources; add others to `PROVIDERS` in `model.js`. Tested on Windows 11 with Herdr 0.1.12.
+- **Limits:** the words are Traditional Chinese only. Claude, Codex, Grok, DeepSeek and Antigravity (its desktop app's local language server, one row per quota pool) are the only sources; add others to `PROVIDERS` in `model.js`. Tested on Windows 11 with Herdr 0.1.12.
 
 ## Done when
 

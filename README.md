@@ -90,7 +90,8 @@ A foldable sidebar section showing how much of each coding-agent subscription yo
 
 - Supports Claude, Codex and Grok subscriptions. Claude Ultra (formerly Max 20x) has no 5-hour limit, so it shows only the weekly row.
 - **DeepSeek API balance,** for the key opencode uses. A pay-as-you-go API has no quota, so this row shows the money left (`¥10.68`) instead of a bar, and turns red when the account can no longer be used. Listed when opencode is installed and has a DeepSeek key. **Needs Node.js 22.5 or later on your PATH.**
-- Checks every 5 minutes, except while folded. The refresh icon checks at once.
+- **Antigravity model quotas,** read from the Antigravity desktop app while it runs. Its models share quota pools, so each pool is one row (`Gemini`, `Argon`, `Claude`); hover a row to see which models it covers. When the app is closed the rows dim and keep their last numbers. The `agy` CLI alone isn't enough. **Needs Node.js on your PATH.**
+- Checks every 5 minutes, except while folded (Claude every 15, since its usage reply is rate limited per account; a 429 pauses it for an hour). The refresh icon checks at once.
 - Click the header to fold or open it.
 - **The interface is Traditional Chinese only.** Tested on Windows 11 with Herdr 0.1.12.
 
@@ -102,8 +103,11 @@ A foldable sidebar section showing how much of each coding-agent subscription yo
 | `~/.codex/auth.json` | `chatgpt.com` |
 | `~/.grok/auth.json` | `cli-chat-proxy.grok.com` |
 | opencode's DeepSeek key: `DEEPSEEK_API_KEY`, else the `deepseek` row of the `credential` table in `~/.local/share/opencode/opencode.db`, else `deepseek.key` in opencode's older `auth.json` | `api.deepseek.com` |
+| On macOS, when `~/.claude/.credentials.json` is missing: the `Claude Code-credentials` Keychain item | `api.anthropic.com` |
+| The CSRF token on the command line of Antigravity's running `language_server` process | that process, on `127.0.0.1` |
 
 - **The DeepSeek key never reaches the mod.** Herdr mods can't read SQLite, so `mods/quota/deepseek-balance.mjs` runs in `node`, reads the key, asks for the balance and prints only the reply.
+- **Antigravity's numbers never leave your machine.** `mods/quota/antigravity-quota.mjs` finds the app's local language server, asks it for the quota, and prints only model names, fractions left, reset times and the plan name (the reply also holds your name and email, which it drops). Its https port has a self-signed certificate, so that fallback skips certificate checks, for `127.0.0.1` only.
 - **It never stores or refreshes a token.** It saves only percentages, balances, plan names, reset times and icon paths, in its own `localStorage`.
 - **When a token expires,** the row dims and keeps its last numbers. Opening that agent renews the token, and the next check recovers.
 - **These usage endpoints aren't public APIs.** A service can change or block them at any time, and using them may not be something it supports. Use this at your own risk.
@@ -175,9 +179,10 @@ node --test "test/*.test.mjs"
 
 側欄裡可以收合的區塊，顯示各個程式代理訂閱用了多少額度、何時重置。只會列出已安裝到 Herdr 且已登入的訂閱，也只顯示該服務回報的時段。
 
-- 支援 Claude、Codex、Grok 的訂閱。
+- 支援 Claude、Codex、Grok 的訂閱。Claude Ultra（原 Max 20x）沒有 5 小時限制，只顯示週額度。
 - **DeepSeek API 餘額**，用的是 opencode 的金鑰。預付制的 API 沒有額度，所以這一列顯示剩下的錢（`¥10.68`），不畫進度條；帳號不能用時會變紅。有安裝 opencode 且設定了 DeepSeek 金鑰才會列出。**需要 PATH 上有 Node.js 22.5 以上。**
-- 每 5 分鐘查詢一次，收合時不查詢。按重新整理圖示會立刻查詢。
+- **Antigravity 模型額度**，在 Antigravity 桌面版執行時向它讀取。它的模型共用額度池，所以一個池子一列（`Gemini`、`Argon`、`Claude`），滑鼠移上去會列出包含哪些模型。App 關掉時會變暗並保留上次的數字。只有 `agy` 命令列工具時讀不到。**需要 PATH 上有 Node.js。**
+- 每 5 分鐘查詢一次，收合時不查詢（Claude 每 15 分鐘，因為它的查詢依帳號限流；遇到 429 會暫停一小時）。按重新整理圖示會立刻查詢。
 - 點標題列可以收合或展開。
 - 介面只有繁體中文。已在 Windows 11 和 Herdr 0.1.12 上測試。
 
@@ -189,8 +194,11 @@ node --test "test/*.test.mjs"
 | `~/.codex/auth.json` | `chatgpt.com` |
 | `~/.grok/auth.json` | `cli-chat-proxy.grok.com` |
 | opencode 的 DeepSeek 金鑰：`DEEPSEEK_API_KEY`，其次是 `~/.local/share/opencode/opencode.db` 裡 `credential` 表的 `deepseek` 列，再其次是 opencode 舊版 `auth.json` 的 `deepseek.key` | `api.deepseek.com` |
+| macOS 上沒有 `~/.claude/.credentials.json` 時：鑰匙圈裡的 `Claude Code-credentials` | `api.anthropic.com` |
+| Antigravity 執行中的 `language_server` 程序命令列上的 CSRF token | 該程序本身，`127.0.0.1` |
 
 - **DeepSeek 金鑰不會進到 MOD。** Herdr 的 MOD 讀不了 SQLite，所以由 `mods/quota/deepseek-balance.mjs` 用 `node` 讀金鑰、查餘額，只把回覆交回來。
+- **Antigravity 的資料不會離開你的電腦。** `mods/quota/antigravity-quota.mjs` 找到 App 的本機 language server、向它查額度，只交回模型名稱、剩餘比例、重置時間和方案名稱（回覆裡的姓名和 email 會丟掉）。它的 https 埠是自簽憑證，所以那條備用路徑不檢查憑證，只限 `127.0.0.1`。
 - **不會儲存或更新憑證。** 它只把百分比、餘額、方案名稱、重置時間和圖示路徑存在自己的 `localStorage`。
 - **憑證過期時，** 那一列會變暗並保留上次的數字。開啟該代理程式會更新憑證，下次查詢就會恢復。
 - **這些查詢端點都不是公開 API。** 服務隨時可能更改或封鎖，也不一定支援這種用法，請自行評估風險。

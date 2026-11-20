@@ -1,7 +1,7 @@
 // Run: node --test "test/*.test.mjs"
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PROVIDERS, busiestPercent, formatMoney, formatReset, isPastReset, levelOf, nextEntry } from "../mods/quota/model.js";
+import { PROVIDERS, RATE_LIMIT_WAIT_MS, antigravityPools, busiestPercent, formatMoney, formatReset, isPastReset, isWaiting, levelOf, nextEntry } from "../mods/quota/model.js";
 
 const provider = (key) => PROVIDERS.find((p) => p.key === key);
 const NOW = Date.parse("2026-11-04T14:00:00Z");
@@ -100,7 +100,11 @@ test("an expired login or failed request keeps the last numbers, marked as old",
   assert.equal(expired.state, "expired");
   assert.equal(expired.at, previous.at);
   assert.deepEqual(expired.windows, previous.windows);
-  assert.equal(nextEntry(p, previous, login, { status: 429 }, NOW).state, "failed");
+  const limited = nextEntry(p, previous, login, { status: 429 }, NOW);
+  assert.equal(limited.state, "limited");
+  assert.deepEqual(limited.windows, previous.windows);
+  assert.equal(isWaiting(limited, NOW + RATE_LIMIT_WAIT_MS - 1), true);
+  assert.equal(isWaiting(limited, NOW + RATE_LIMIT_WAIT_MS), false);
   assert.equal(nextEntry(p, previous, login, { failed: true }, NOW).state, "failed");
   assert.deepEqual(nextEntry(p, null, login, { status: 401 }, NOW).windows, []);
 });
@@ -154,4 +158,35 @@ test("a window past its reset has no known number", () => {
   assert.equal(isPastReset(entry.windows[0], NOW), true);
   assert.equal(busiestPercent(entry, NOW), 11);
   assert.equal(busiestPercent({ windows: [entry.windows[0]] }, NOW), null);
+});
+
+const agModels = [
+  { label: "Gemini 4 Neon (High)", remainingFraction: 0.97, resetTime: "2026-11-04T18:00:00Z" },
+  { label: "Gemini 3.8 Flash (Low)", remainingFraction: 0.97, resetTime: "2026-11-04T18:00:00Z" },
+  { label: "Orchestrator (Neon)", remainingFraction: 0.97, resetTime: "2026-11-04T18:00:00Z" },
+  { label: "Gemini 4 Argon (High)", remainingFraction: 1, resetTime: "2026-11-11T01:00:00Z" },
+  { label: "Orchestrator (Argon)", remainingFraction: 1, resetTime: "2026-11-11T01:00:00Z" },
+  { label: "Claude Opus 5.5 (High)", remainingFraction: 0.4, resetTime: "2026-11-04T18:07:00Z" },
+  { label: "GPT-OSS 120B (Medium)", remainingFraction: 0.4, resetTime: "2026-11-04T18:07:00Z" },
+];
+
+test("Antigravity shows one row per shared quota pool, as used percent", () => {
+  const windows = antigravityPools(agModels);
+  assert.deepEqual(windows.map((w) => [w.label, w.percent]), [["Gemini", 3], ["Argon", 0], ["Claude", 60]]);
+  assert.equal(windows[0].resetsAt, Date.parse("2026-11-04T18:00:00Z"));
+  assert.equal(windows[2].detail, "Claude Opus 5.5、GPT-OSS 120B");
+  // The helper sends a used-up pool with fraction 0.
+  assert.equal(antigravityPools([{ label: "Gemini 4 Neon (High)", remainingFraction: 0, resetTime: "2026-11-04T18:00:00Z" }])[0].percent, 100);
+});
+
+test("Antigravity keeps its last numbers while the app is closed", () => {
+  const p = provider("antigravity");
+  const fresh = nextEntry(p, null, {}, { status: 200, body: JSON.stringify({ plan: "Google AI Pro", models: agModels }) }, NOW);
+  assert.equal(fresh.plan, "Google AI Pro");
+  assert.equal(fresh.windows.length, 3);
+  const offline = nextEntry(p, fresh, {}, { offline: true }, NOW + 1000);
+  assert.equal(offline.state, "offline");
+  assert.deepEqual(offline.windows, fresh.windows);
+  assert.equal(nextEntry(p, null, {}, { offline: true }, NOW), null);
+  assert.equal(nextEntry(p, null, {}, { status: 200, body: JSON.stringify({ models: [] }) }, NOW), null);
 });

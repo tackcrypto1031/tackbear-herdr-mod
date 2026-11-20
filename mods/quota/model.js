@@ -44,6 +44,10 @@ export const PROVIDERS = [
     name: "Claude",
     agent: "Claude Code",
     loginFile: ".claude/.credentials.json",
+    // macOS keeps Claude Code's login in the Keychain, not the file.
+    keychain: "Claude Code-credentials",
+    // The usage reply is rate limited per account, and every machine signed in to it asks.
+    everyMs: 15 * 60 * 1000,
     login(text) {
       const auth = parseJson(text)?.claudeAiOauth;
       if (!auth?.accessToken || !auth.subscriptionType) return null;
@@ -121,7 +125,52 @@ export const PROVIDERS = [
       return { windows: (shown.length ? shown : infos.slice(0, 1)).map((info) => ({ label: "餘額", ...info, low, resetsAt: null })) };
     },
   },
+  {
+    key: "antigravity",
+    name: "Antigravity",
+    agent: "Antigravity",
+    // An app, not a terminal agent: the helper decides whether it's installed.
+    standalone: true,
+    icon: { icon: "icons/antigravity.svg", tint: false },
+    helper: "antigravity-quota.mjs",
+    parse(reply) {
+      return { plan: reply?.plan ?? null, windows: antigravityPools(reply?.models ?? []) };
+    },
+  },
 ];
+
+const baseName = (label) => label.replace(/\s*\(.*?\)\s*/g, " ").trim();
+const wordsOf = (label) => new Set(label.split(/[^A-Za-z0-9.]+/).filter((w) => /^[A-Za-z]{3,}$/.test(w)));
+
+/**
+ * Antigravity models share quota pools: every model in a pool reports the same fraction left and
+ * the same reset. Each pool becomes one row, named "Claude" for the non-Google models, by a word
+ * all its models share and no other pool has (e.g. "Argon"), or else "Gemini".
+ */
+export function antigravityPools(models) {
+  const pools = new Map();
+  for (const m of models) {
+    if (typeof m.remainingFraction !== "number") continue;
+    const key = `${m.resetTime}|${m.remainingFraction}`;
+    if (!pools.has(key)) pools.set(key, { labels: [], left: m.remainingFraction, resetsAt: m.resetTime ? toMs(m.resetTime) : null });
+    pools.get(key).labels.push(m.label);
+  }
+  const list = [...pools.values()];
+  const used = new Set();
+  return list.map((pool) => {
+    let name;
+    if (pool.labels.some((l) => /claude|gpt/i.test(l))) name = "Claude";
+    else {
+      const others = list.filter((p) => p !== pool).flatMap((p) => p.labels.flatMap((l) => [...wordsOf(l)]));
+      const shared = [...wordsOf(pool.labels[0])].filter((w) => pool.labels.every((l) => wordsOf(l).has(w)) && !others.includes(w));
+      name = shared.find((w) => !/^(High|Low|Medium|XHigh)$/.test(w)) ?? (pool.labels.some((l) => /gemini/i.test(l)) ? "Gemini" : baseName(pool.labels[0]).split(" ")[0]);
+    }
+    while (used.has(name)) name += "+";
+    used.add(name);
+    const window = windowOf(name, (1 - pool.left) * 100, pool.resetsAt);
+    return window && { ...window, detail: [...new Set(pool.labels.map(baseName))].join("、") };
+  }).filter(Boolean);
+}
 
 const CURRENCY_SIGNS = { CNY: "¥", USD: "$" };
 
@@ -145,9 +194,19 @@ export function nextEntry(provider, previous, login, outcome, now) {
     if (!usage.windows.length) return null;
     return { state: "fresh", plan: login.plan ?? usage.plan ?? null, windows: usage.windows, at: now };
   }
-  const state = outcome.status === 401 ? "expired" : "failed";
-  return { plan: login.plan ?? previous?.plan ?? null, windows: previous?.windows ?? [], at: previous?.at ?? null, state };
+  const kept = { plan: login.plan ?? previous?.plan ?? null, windows: previous?.windows ?? [], at: previous?.at ?? null };
+  // An app that answers only while it runs: keep its last numbers, or show nothing if there are none.
+  if (outcome.offline) return kept.windows.length ? { ...kept, state: "offline" } : null;
+  // Asking again while limited only extends the limit (Claude's usage reply asks for about an hour),
+  // and the mod's fetch can't read Retry-After, so wait a fixed while.
+  if (outcome.status === 429) return { ...kept, state: "limited", retryAt: now + RATE_LIMIT_WAIT_MS };
+  return { ...kept, state: outcome.status === 401 ? "expired" : "failed" };
 }
+
+export const RATE_LIMIT_WAIT_MS = 60 * 60 * 1000;
+
+/** While a service has asked to be left alone, its last entry stands and it isn't asked. */
+export const isWaiting = (entry, now) => entry?.state === "limited" && entry.retryAt > now;
 
 /** A window past its reset no longer has a known number: it is back near zero until the next reply. */
 export const isPastReset = (w, now) => w.resetsAt != null && w.resetsAt <= now;

@@ -1,12 +1,13 @@
 // Used quota of each subscription that is installed in Herdr and logged in, as a sidebar section,
-// and what's left on a pay-as-you-go API account (DeepSeek, through opencode's key).
+// and what's left on a pay-as-you-go API account (DeepSeek, through opencode's key),
+// and the model pools of the Antigravity app, asked of its own local server while it runs.
 // Login tokens are read when asking, sent only to the service that issued them and never kept:
 // localStorage holds only the percentages and balances. Tokens are never refreshed here, because a refresh
 // could sign out the agent that owns them; the agents renew them when they run.
 import { View, div, image, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
 import { appHome, exec, home, knownAgents, layout, props, readTextFile, run, settings, setShared, shared, theme } from "herdr";
-import { PROVIDERS, busiestPercent, formatDate, formatMoney, formatReset, isBalance, isPastReset, levelOf, nextEntry } from "./model.js";
+import { PROVIDERS, busiestPercent, formatDate, formatMoney, formatReset, isBalance, isPastReset, isWaiting, levelOf, nextEntry } from "./model.js";
 
 const POLL_MS = 5 * 60 * 1000;
 const MIN_MANUAL_GAP_MS = 30 * 1000; // These services limit how often they can be asked.
@@ -60,9 +61,11 @@ export default class Quota extends View {
       const saved = JSON.parse(localStorage.getItem("saved") ?? "{}");
       this.entries = saved.entries ?? {};
       this.programs = saved.programs ?? {};
+      this.askedAt = saved.askedAt ?? {};
     } catch {
       // Unreadable saved numbers only cost the first paint.
     }
+    this.askedAt ??= {}; // When each provider was last asked, for those with their own `everyMs`.
     this.lastAsked = 0;
     // While folded nothing shows these numbers, so the services aren't asked.
     cx.timer.every(POLL_MS, (cx) => { if (!folded()) this.refresh(cx); });
@@ -74,10 +77,11 @@ export default class Quota extends View {
   toggleFold(cx) {
     const fold = !folded();
     setShared("quota.folded", fold);
-    if (!fold) this.refreshByHand(cx);
+    if (!fold) this.refreshByHand(cx, false);
   }
 
-  refresh(cx) {
+  /** `byHand` is the refresh button: it asks even a provider whose own interval hasn't passed. */
+  refresh(cx, byHand = false) {
     if (this.refreshing) return;
     this.refreshing = true;
     this.lastAsked = Date.now();
@@ -89,9 +93,15 @@ export default class Quota extends View {
         const entries = {};
         await Promise.all(PROVIDERS.map(async (provider) => {
           const program = agents?.find((a) => a.key === (provider.program ?? provider.key));
-          if (agents && !program?.installed) return;
+          if (agents && !provider.standalone && !program?.installed) return;
           if (provider.icon) this.programs[provider.key] = provider.icon;
           else if (program) this.programs[provider.key] = { icon: program.icon, tint: program.tint };
+          const previous = this.entries[provider.key];
+          const tooSoon = !byHand && previous && provider.everyMs && Date.now() - (this.askedAt[provider.key] ?? 0) < provider.everyMs;
+          if (tooSoon || isWaiting(previous, Date.now())) {
+            entries[provider.key] = previous;
+            return;
+          }
           let login;
           let outcome;
           if (provider.helper) {
@@ -100,6 +110,11 @@ export default class Quota extends View {
           } else {
             const text = await readTextFile(`${home()}/${provider.loginFile}`).catch(() => null);
             login = text ? provider.login(text) : null;
+            if (!login && provider.keychain) {
+              const found = await exec("/usr/bin/security", ["find-generic-password", "-s", provider.keychain, "-w"]).catch(() => null);
+              login = found?.code === 0 ? provider.login(found.stdout.trim()) : null;
+            }
+            if (login) this.askedAt[provider.key] = Date.now();
             outcome = login && await ask(login);
           }
           if (!outcome) return;
@@ -107,7 +122,7 @@ export default class Quota extends View {
           if (entry) entries[provider.key] = entry;
         }));
         this.entries = entries;
-        localStorage.setItem("saved", JSON.stringify({ entries, programs: this.programs }));
+        localStorage.setItem("saved", JSON.stringify({ entries, programs: this.programs, askedAt: this.askedAt }));
       } finally {
         this.refreshing = false;
         this.loading = false;
@@ -116,8 +131,8 @@ export default class Quota extends View {
     });
   }
 
-  refreshByHand(cx) {
-    if (Date.now() - this.lastAsked >= MIN_MANUAL_GAP_MS) this.refresh(cx);
+  refreshByHand(cx, button = true) {
+    if (Date.now() - this.lastAsked >= MIN_MANUAL_GAP_MS) this.refresh(cx, button);
   }
 
   // Grows and shrinks the layout's block to what's listed, as the chat box does.
@@ -137,6 +152,8 @@ export default class Quota extends View {
   whyOld(provider, entry) {
     if (entry.state === "fresh") return "";
     const when = entry.at ? `資料時間 ${formatDate(entry.at)}，` : "";
+    if (entry.state === "limited") return `${when}查詢太頻繁被限流，${formatDate(entry.retryAt)} 後再查`;
+    if (entry.state === "offline") return `${when}${provider.agent} 沒有在執行，開啟後會更新`;
     if (entry.state !== "expired") return `${when}暫時查不到額度`;
     return provider.helper ? `${when}API 金鑰無效，請在 ${provider.agent} 重新設定` : `${when}登入憑證已過期，開啟 ${provider.agent} 後會更新`;
   }
@@ -169,11 +186,12 @@ export default class Quota extends View {
     const tip = [
       `${title} · ${w.label}額度已用 ${percent == null ? "未知" : `${percent}%`}`,
       w.resetsAt == null ? "" : `重置時間 ${formatDate(w.resetsAt)}`,
+      w.detail ? `模型：${w.detail}` : "",
       this.whyOld(provider, entry),
     ].filter(Boolean).join("\n");
     return h_flex().id(`row-${provider.key}-${w.label}`).h(21).px(16).gap(6).items_center().tooltip(tip)
       .child(this.nameCell(t, provider, first))
-      .child(div().w(18).flex_none().text_color(t.muted).child(w.label))
+      .child(div().w(this.labelWidth).flex_none().truncate().text_color(t.muted).child(w.label))
       .child(h_flex().flex_1().min_w(0).h(4).rounded(2).overflow_hidden().bg(t.border)
         .when(percent > 0, (el) => el.child(div().h_full().flex_basis(0).flex_grow(percent).bg(old ? t.dim : this.barColor(t, percent))))
         .child(div().h_full().flex_basis(0).flex_grow(100 - (percent ?? 0))))
@@ -182,18 +200,21 @@ export default class Quota extends View {
   }
 
   nameCell(t, provider, first) {
-    const cell = h_flex().w(76).flex_none().gap(6).items_center(); // Fits "DeepSeek".
+    const cell = h_flex().w(84).flex_none().gap(6).items_center(); // Fits "Antigravity".
     if (!first) return cell;
     return cell.child(icon(this.programs[provider.key], provider.key, 13, t.foreground)).child(div().truncate().text_color(t.muted).child(provider.name));
   }
 
   rows(t, now) {
+    // Room for a pool name ("Gemini") when one is listed, else just "5H" / "週".
+    const long = this.shown().some((p) => this.entries[p.key].windows.some((w) => !isBalance(w) && w.label.length > 2));
+    this.labelWidth = long ? 40 : 18;
     return this.shown().flatMap((provider) => {
       const entry = this.entries[provider.key];
       if (entry.windows.length) return entry.windows.map((w, i) => this.windowRow(t, provider, entry, w, i === 0, now));
       return [h_flex().id(`row-${provider.key}`).h(21).px(16).gap(6).items_center().tooltip(this.whyOld(provider, entry))
         .child(this.nameCell(t, provider, true))
-        .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(entry.state !== "expired" ? "暫時查不到額度" : provider.helper ? "API 金鑰無效" : `開啟 ${provider.agent} 後更新`))];
+        .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(entry.state === "limited" ? `限流中，${formatDate(entry.retryAt).slice(6)} 後再查` : entry.state !== "expired" ? "暫時查不到額度" : provider.helper ? "API 金鑰無效" : `開啟 ${provider.agent} 後更新`))];
     });
   }
 
