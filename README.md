@@ -90,7 +90,7 @@ A foldable sidebar section showing how much of each coding-agent subscription yo
 
 - Supports Claude, Codex and Grok subscriptions. Claude Ultra (formerly Max 20x) has no 5-hour limit, so it shows only the weekly row.
 - **DeepSeek API balance,** for the key opencode uses. A pay-as-you-go API has no quota, so this row shows the money left (`¥10.68`) instead of a bar, and turns red when the account can no longer be used. Listed when opencode is installed and has a DeepSeek key. **Needs Node.js 22.5 or later on your PATH.**
-- **Antigravity model quotas,** read from the Antigravity desktop app while it runs. Its models share quota pools, so each pool is one row (`Gemini`, `Argon`, `Claude`); hover a row to see which models it covers. When the app is closed the rows dim and keep their last numbers. The `agy` CLI alone isn't enough. **Needs Node.js on your PATH.**
+- **Antigravity model quotas,** read from the Antigravity desktop app while it runs. It has two quotas, so two rows: `Gemini` for the Gemini models and `Claude` for the Claude and GPT models, which share one; hover a row to see which models it covers. When the app is closed the rows dim and keep their last numbers. The `agy` CLI alone isn't enough. **Needs Node.js on your PATH.**
 - Checks every 5 minutes, except while folded (Claude every 15, since its usage reply is rate limited per account; a 429 pauses it for an hour). The refresh icon checks at once.
 - Click the header to fold or open it.
 - **The interface is Traditional Chinese only.** Tested on Windows 11 with Herdr 0.1.12.
@@ -181,7 +181,7 @@ node --test "test/*.test.mjs"
 
 - 支援 Claude、Codex、Grok 的訂閱。Claude Ultra（原 Max 20x）沒有 5 小時限制，只顯示週額度。
 - **DeepSeek API 餘額**，用的是 opencode 的金鑰。預付制的 API 沒有額度，所以這一列顯示剩下的錢（`¥10.68`），不畫進度條；帳號不能用時會變紅。有安裝 opencode 且設定了 DeepSeek 金鑰才會列出。**需要 PATH 上有 Node.js 22.5 以上。**
-- **Antigravity 模型額度**，在 Antigravity 桌面版執行時向它讀取。它的模型共用額度池，所以一個池子一列（`Gemini`、`Argon`、`Claude`），滑鼠移上去會列出包含哪些模型。App 關掉時會變暗並保留上次的數字。只有 `agy` 命令列工具時讀不到。**需要 PATH 上有 Node.js。**
+- **Antigravity 模型額度**，在 Antigravity 桌面版執行時向它讀取。它只有兩份額度，所以兩列：`Gemini` 給 Gemini 模型，`Claude` 給共用一份額度的 Claude 與 GPT 模型，滑鼠移上去會列出包含哪些模型。App 關掉時會變暗並保留上次的數字。只有 `agy` 命令列工具時讀不到。**需要 PATH 上有 Node.js。**
 - 每 5 分鐘查詢一次，收合時不查詢（Claude 每 15 分鐘，因為它的查詢依帳號限流；遇到 429 會暫停一小時）。按重新整理圖示會立刻查詢。
 - 點標題列可以收合或展開。
 - 介面只有繁體中文。已在 Windows 11 和 Herdr 0.1.12 上測試。

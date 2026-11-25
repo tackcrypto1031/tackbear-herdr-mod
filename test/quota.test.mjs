@@ -164,17 +164,20 @@ const agModels = [
   { label: "Gemini 4 Neon (High)", remainingFraction: 0.97, resetTime: "2026-11-04T18:00:00Z" },
   { label: "Gemini 3.8 Flash (Low)", remainingFraction: 0.97, resetTime: "2026-11-04T18:00:00Z" },
   { label: "Orchestrator (Neon)", remainingFraction: 0.97, resetTime: "2026-11-04T18:00:00Z" },
-  { label: "Gemini 4 Argon (High)", remainingFraction: 1, resetTime: "2026-11-11T01:00:00Z" },
-  { label: "Orchestrator (Argon)", remainingFraction: 1, resetTime: "2026-11-11T01:00:00Z" },
+  { label: "Gemini 4 Argon (High)", remainingFraction: 0.97, resetTime: "2026-11-04T18:00:00Z" },
+  { label: "Orchestrator (Argon)", remainingFraction: 0.97, resetTime: "2026-11-04T18:00:00Z" },
   { label: "Claude Opus 5.5 (High)", remainingFraction: 0.4, resetTime: "2026-11-04T18:07:00Z" },
   { label: "GPT-OSS 120B (Medium)", remainingFraction: 0.4, resetTime: "2026-11-04T18:07:00Z" },
 ];
 
-test("Antigravity shows one row per shared quota pool, as used percent", () => {
+test("Antigravity shows a Gemini row and a shared Claude + GPT row, as used percent", () => {
   const windows = antigravityPools(agModels);
-  assert.deepEqual(windows.map((w) => [w.label, w.percent]), [["Gemini", 3], ["Argon", 0], ["Claude", 60]]);
+  assert.deepEqual(windows.map((w) => [w.label, w.percent]), [["Gemini", 3], ["Claude", 60]]);
   assert.equal(windows[0].resetsAt, Date.parse("2026-11-04T18:00:00Z"));
-  assert.equal(windows[2].detail, "Claude Opus 5.5、GPT-OSS 120B");
+  assert.equal(windows[1].detail, "Claude Opus 5.5、GPT-OSS 120B");
+  // Models of one quota that disagree show the one with the least left.
+  const mixed = antigravityPools([...agModels.slice(0, 2), { ...agModels[2], remainingFraction: 0.5, resetTime: "2026-11-05T00:00:00Z" }]);
+  assert.deepEqual(mixed.map((w) => [w.label, w.percent, w.resetsAt]), [["Gemini", 50, Date.parse("2026-11-05T00:00:00Z")]]);
   // The helper sends a used-up pool with fraction 0.
   assert.equal(antigravityPools([{ label: "Gemini 4 Neon (High)", remainingFraction: 0, resetTime: "2026-11-04T18:00:00Z" }])[0].percent, 100);
 });
@@ -183,7 +186,7 @@ test("Antigravity keeps its last numbers while the app is closed", () => {
   const p = provider("antigravity");
   const fresh = nextEntry(p, null, {}, { status: 200, body: JSON.stringify({ plan: "Google AI Pro", models: agModels }) }, NOW);
   assert.equal(fresh.plan, "Google AI Pro");
-  assert.equal(fresh.windows.length, 3);
+  assert.equal(fresh.windows.length, 2);
   const offline = nextEntry(p, fresh, {}, { offline: true }, NOW + 1000);
   assert.equal(offline.state, "offline");
   assert.deepEqual(offline.windows, fresh.windows);

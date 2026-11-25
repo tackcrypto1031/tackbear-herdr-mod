@@ -140,34 +140,25 @@ export const PROVIDERS = [
 ];
 
 const baseName = (label) => label.replace(/\s*\(.*?\)\s*/g, " ").trim();
-const wordsOf = (label) => new Set(label.split(/[^A-Za-z0-9.]+/).filter((w) => /^[A-Za-z]{3,}$/.test(w)));
 
 /**
- * Antigravity models share quota pools: every model in a pool reports the same fraction left and
- * the same reset. Each pool becomes one row, named "Claude" for the non-Google models, by a word
- * all its models share and no other pool has (e.g. "Argon"), or else "Gemini".
+ * Antigravity has two quotas: one for every Gemini model, one that Claude and GPT models share.
+ * Each becomes one row, Gemini first. Should the models of one quota ever disagree, the row
+ * shows the one with the least left.
  */
 export function antigravityPools(models) {
-  const pools = new Map();
+  const pools = new Map([["Gemini", null], ["Claude", null]]);
   for (const m of models) {
     if (typeof m.remainingFraction !== "number") continue;
-    const key = `${m.resetTime}|${m.remainingFraction}`;
-    if (!pools.has(key)) pools.set(key, { labels: [], left: m.remainingFraction, resetsAt: m.resetTime ? toMs(m.resetTime) : null });
-    pools.get(key).labels.push(m.label);
+    const name = /claude|gpt/i.test(m.label) ? "Claude" : "Gemini";
+    const resetsAt = m.resetTime ? toMs(m.resetTime) : null;
+    const pool = pools.get(name) ?? { labels: [], left: m.remainingFraction, resetsAt };
+    if (m.remainingFraction < pool.left) Object.assign(pool, { left: m.remainingFraction, resetsAt });
+    pool.labels.push(m.label);
+    pools.set(name, pool);
   }
-  const list = [...pools.values()];
-  const used = new Set();
-  return list.map((pool) => {
-    let name;
-    if (pool.labels.some((l) => /claude|gpt/i.test(l))) name = "Claude";
-    else {
-      const others = list.filter((p) => p !== pool).flatMap((p) => p.labels.flatMap((l) => [...wordsOf(l)]));
-      const shared = [...wordsOf(pool.labels[0])].filter((w) => pool.labels.every((l) => wordsOf(l).has(w)) && !others.includes(w));
-      name = shared.find((w) => !/^(High|Low|Medium|XHigh)$/.test(w)) ?? (pool.labels.some((l) => /gemini/i.test(l)) ? "Gemini" : baseName(pool.labels[0]).split(" ")[0]);
-    }
-    while (used.has(name)) name += "+";
-    used.add(name);
-    const window = windowOf(name, (1 - pool.left) * 100, pool.resetsAt);
+  return [...pools].map(([name, pool]) => {
+    const window = pool && windowOf(name, (1 - pool.left) * 100, pool.resetsAt);
     return window && { ...window, detail: [...new Set(pool.labels.map(baseName))].join("、") };
   }).filter(Boolean);
 }
