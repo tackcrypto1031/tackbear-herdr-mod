@@ -190,6 +190,9 @@ test("Antigravity keeps its last numbers while the app is closed", () => {
   const offline = nextEntry(p, fresh, {}, { offline: true }, NOW + 1000);
   assert.equal(offline.state, "offline");
   assert.deepEqual(offline.windows, fresh.windows);
+  // Rows saved under the old grouping go away.
+  const old = { ...fresh, windows: [...fresh.windows, { ...fresh.windows[0], label: "Argon" }] };
+  assert.deepEqual(nextEntry(p, old, {}, { offline: true }, NOW).windows.map((w) => w.label), ["Gemini", "Claude"]);
   assert.equal(nextEntry(p, null, {}, { offline: true }, NOW), null);
   assert.equal(nextEntry(p, null, {}, { status: 200, body: JSON.stringify({ models: [] }) }, NOW), null);
 });

@@ -133,6 +133,8 @@ export const PROVIDERS = [
     standalone: true,
     icon: { icon: "icons/antigravity.svg", tint: false },
     helper: "antigravity-quota.mjs",
+    // The only rows it makes; saved rows by other names (the old "Argon") are dropped.
+    labels: ["Gemini", "Claude"],
     parse(reply) {
       return { plan: reply?.plan ?? null, windows: antigravityPools(reply?.models ?? []) };
     },
@@ -185,7 +187,8 @@ export function nextEntry(provider, previous, login, outcome, now) {
     if (!usage.windows.length) return null;
     return { state: "fresh", plan: login.plan ?? usage.plan ?? null, windows: usage.windows, at: now };
   }
-  const kept = { plan: login.plan ?? previous?.plan ?? null, windows: previous?.windows ?? [], at: previous?.at ?? null };
+  const windows = (previous?.windows ?? []).filter((w) => !provider.labels || provider.labels.includes(w.label));
+  const kept = { plan: login.plan ?? previous?.plan ?? null, windows, at: previous?.at ?? null };
   // An app that answers only while it runs: keep its last numbers, or show nothing if there are none.
   if (outcome.offline) return kept.windows.length ? { ...kept, state: "offline" } : null;
   // Asking again while limited only extends the limit (Claude's usage reply asks for about an hour),
