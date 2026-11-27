@@ -4,6 +4,10 @@
 // `parse` also gets what `login` returned, for plans that change which windows count.
 // A pay-as-you-go API has no quota, only a balance: its entry names a `helper` script that asks
 // for it (the key lives where the mod can't read it), and its windows carry `amount`, not `percent`.
+// A service whose own CLI keeps the login names that CLI as `command`, and `commandOutcome` turns
+// what it printed into `{ status, body }`, so the mod never sees the token.
+
+import { t } from "./i18n.js";
 
 const WEEK = 604800;
 const FIVE_HOURS = 18000;
@@ -84,6 +88,27 @@ export const PROVIDERS = [
       const part = (w) => w && windowOf(labelOfSeconds(w.limit_window_seconds), w.used_percent, w.reset_at * 1000);
       const limits = reply?.rate_limit;
       return { plan: planName(reply?.plan_type), windows: [part(limits?.primary_window), part(limits?.secondary_window)].filter(Boolean) };
+    },
+  },
+  {
+    key: "copilot",
+    name: "Copilot",
+    agent: "Copilot",
+    // Asked through the gh CLI, which keeps the GitHub login, so the token never reaches the mod.
+    command: ["gh", "api", "/copilot_internal/user"],
+    reloginCommand: "gh auth login",
+    commandOutcome(result) {
+      if (result.code === 0) return { status: 200, body: result.stdout };
+      // gh prints "HTTP 401" for a bad token and "gh auth login" when there's none.
+      return /HTTP 40[13]|gh auth login/.test(result.stderr ?? "") ? { status: 401 } : { failed: true };
+    },
+    parse(reply) {
+      // Premium requests are the only monthly limit; chat and completions are unlimited on paid plans.
+      const premium = reply?.quota_snapshots?.premium_interactions;
+      const plan = planName(reply?.copilot_plan);
+      if (!premium || premium.unlimited || typeof premium.percent_remaining !== "number") return { plan, windows: [] };
+      const resetsAt = toMs(reply.quota_reset_date_utc ?? reply.quota_reset_date);
+      return { plan, windows: [windowOf("月", 100 - premium.percent_remaining, resetsAt)] };
     },
   },
   {
@@ -199,6 +224,19 @@ export function nextEntry(provider, previous, login, outcome, now) {
 
 export const RATE_LIMIT_WAIT_MS = 60 * 60 * 1000;
 
+/** How long a provider that suddenly can't be asked keeps its last numbers before it's dropped. */
+export const MISS_GRACE_MS = 6 * 60 * 60 * 1000;
+
+/**
+ * When a provider gave no answer at all (its login couldn't be read, its CLI didn't start), a
+ * one-off hiccup such as a locked Keychain shouldn't make the row vanish: the last numbers stay,
+ * marked as old, until they are `MISS_GRACE_MS` old. Null drops the row, as for a signed-out account.
+ */
+export function missedEntry(previous, now) {
+  if (!previous?.windows?.length || previous.at == null || now - previous.at > MISS_GRACE_MS) return null;
+  return previous.state === "fresh" ? { ...previous, state: "failed" } : previous;
+}
+
 /** While a service has asked to be left alone, its last entry stands and it isn't asked. */
 export const isWaiting = (entry, now) => entry?.state === "limited" && entry.retryAt > now;
 
@@ -208,11 +246,12 @@ export const isPastReset = (w, now) => w.resetsAt != null && w.resetsAt <= now;
 export function formatReset(resetsAt, now) {
   if (resetsAt == null) return "";
   const minutes = Math.ceil((resetsAt - now) / 60000);
-  if (minutes <= 0) return "已重置";
-  if (minutes < 60) return `${minutes}分`;
+  if (minutes <= 0) return t("resetDone");
+  if (minutes < 60) return t("minutes", { m: minutes });
   const hours = Math.floor(minutes / 60);
-  if (hours < 24) return minutes % 60 ? `${hours}時${minutes % 60}分` : `${hours}時`;
-  return hours % 24 ? `${Math.floor(hours / 24)}天${hours % 24}時` : `${Math.floor(hours / 24)}天`;
+  if (hours < 24) return minutes % 60 ? t("hoursMinutes", { h: hours, m: minutes % 60 }) : t("hours", { h: hours });
+  const d = Math.floor(hours / 24);
+  return hours % 24 ? t("daysHours", { d, h: hours % 24 }) : t("days", { d });
 }
 
 /** Local time of a reset, for the tooltip. */

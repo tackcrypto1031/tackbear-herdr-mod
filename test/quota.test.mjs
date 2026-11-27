@@ -1,7 +1,8 @@
 // Run: node --test "test/*.test.mjs"
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PROVIDERS, RATE_LIMIT_WAIT_MS, antigravityPools, busiestPercent, formatMoney, formatReset, isPastReset, isWaiting, levelOf, nextEntry } from "../mods/quota/model.js";
+import { PROVIDERS, RATE_LIMIT_WAIT_MS, antigravityPools, busiestPercent, formatMoney, formatReset, isPastReset, isWaiting, levelOf, MISS_GRACE_MS, missedEntry, nextEntry } from "../mods/quota/model.js";
+import { labelText, setLanguage } from "../mods/quota/i18n.js";
 
 const provider = (key) => PROVIDERS.find((p) => p.key === key);
 const NOW = Date.parse("2026-11-04T14:00:00Z");
@@ -84,6 +85,32 @@ test("what is remembered never holds the token", () => {
   const fresh = nextEntry(p, null, login, { status: 200, body: JSON.stringify({ five_hour: { utilization: 1, resets_at: "2026-11-04T15:00:00Z" } }) }, NOW);
   const expired = nextEntry(p, fresh, login, { status: 401 }, NOW);
   assert.ok(!JSON.stringify([fresh, expired]).includes("SECRET"));
+});
+
+test("Copilot shows its monthly premium requests as used percent", () => {
+  const p = provider("copilot");
+  const reply = {
+    copilot_plan: "business",
+    quota_reset_date: "2026-12-01",
+    quota_reset_date_utc: "2026-12-01T00:00:00.000Z",
+    quota_snapshots: {
+      chat: { unlimited: true, percent_remaining: 100 },
+      premium_interactions: { unlimited: false, percent_remaining: 5.4, entitlement: 30000, remaining: 1646 },
+    },
+  };
+  const entry = nextEntry(p, null, {}, { status: 200, body: JSON.stringify(reply) }, NOW);
+  assert.equal(entry.plan, "Business");
+  assert.deepEqual(entry.windows, [{ label: "月", percent: 95, resetsAt: Date.parse("2026-12-01T00:00:00Z") }]);
+  const unlimited = { quota_snapshots: { premium_interactions: { unlimited: true, percent_remaining: 100 } } };
+  assert.equal(nextEntry(p, null, {}, { status: 200, body: JSON.stringify(unlimited) }, NOW), null);
+});
+
+test("Copilot reads gh's exit: signed out is expired, anything else a failed request", () => {
+  const p = provider("copilot");
+  assert.deepEqual(p.commandOutcome({ code: 0, stdout: "{}", stderr: "" }), { status: 200, body: "{}" });
+  assert.deepEqual(p.commandOutcome({ code: 1, stdout: "", stderr: "gh: Bad credentials (HTTP 401)" }), { status: 401 });
+  assert.deepEqual(p.commandOutcome({ code: 4, stdout: "", stderr: "To get started with GitHub CLI, please run:  gh auth login" }), { status: 401 });
+  assert.deepEqual(p.commandOutcome({ code: 1, stdout: "", stderr: "dial tcp: lookup api.github.com: no such host" }), { failed: true });
 });
 
 test("an account without quota isn't listed", () => {
@@ -195,4 +222,25 @@ test("Antigravity keeps its last numbers while the app is closed", () => {
   assert.deepEqual(nextEntry(p, old, {}, { offline: true }, NOW).windows.map((w) => w.label), ["Gemini", "Claude"]);
   assert.equal(nextEntry(p, null, {}, { offline: true }, NOW), null);
   assert.equal(nextEntry(p, null, {}, { status: 200, body: JSON.stringify({ models: [] }) }, NOW), null);
+});
+
+test("a provider that gives no answer keeps its last numbers, marked old, for a while", () => {
+  const previous = { state: "fresh", plan: null, windows: [{ label: "週", percent: 7, resetsAt: NOW + 1000 }], at: NOW - 1000 };
+  assert.deepEqual(missedEntry(previous, NOW), { ...previous, state: "failed" });
+  assert.equal(missedEntry({ ...previous, state: "expired" }, NOW).state, "expired");
+  assert.equal(missedEntry({ ...previous, at: NOW - MISS_GRACE_MS - 1 }, NOW), null);
+  assert.equal(missedEntry(undefined, NOW), null);
+});
+
+test("props.lang en shows English units and labels", () => {
+  setLanguage("en");
+  try {
+    assert.equal(formatReset(NOW + (5 * 24 + 22) * 60 * 60000, NOW), "5d22h");
+    assert.equal(formatReset(NOW - 1, NOW), "reset");
+    assert.equal(labelText("週"), "Wk");
+    assert.equal(labelText("5H"), "5H");
+  } finally {
+    setLanguage(undefined);
+  }
+  assert.equal(labelText("週"), "週");
 });
