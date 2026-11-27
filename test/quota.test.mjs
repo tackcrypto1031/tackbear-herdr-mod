@@ -86,6 +86,32 @@ test("what is remembered never holds the token", () => {
   assert.ok(!JSON.stringify([fresh, expired]).includes("SECRET"));
 });
 
+test("Copilot shows its monthly premium requests as used percent", () => {
+  const p = provider("copilot");
+  const reply = {
+    copilot_plan: "business",
+    quota_reset_date: "2026-12-01",
+    quota_reset_date_utc: "2026-12-01T00:00:00.000Z",
+    quota_snapshots: {
+      chat: { unlimited: true, percent_remaining: 100 },
+      premium_interactions: { unlimited: false, percent_remaining: 5.4, entitlement: 30000, remaining: 1646 },
+    },
+  };
+  const entry = nextEntry(p, null, {}, { status: 200, body: JSON.stringify(reply) }, NOW);
+  assert.equal(entry.plan, "Business");
+  assert.deepEqual(entry.windows, [{ label: "月", percent: 95, resetsAt: Date.parse("2026-12-01T00:00:00Z") }]);
+  const unlimited = { quota_snapshots: { premium_interactions: { unlimited: true, percent_remaining: 100 } } };
+  assert.equal(nextEntry(p, null, {}, { status: 200, body: JSON.stringify(unlimited) }, NOW), null);
+});
+
+test("Copilot reads gh's exit: signed out is expired, anything else a failed request", () => {
+  const p = provider("copilot");
+  assert.deepEqual(p.commandOutcome({ code: 0, stdout: "{}", stderr: "" }), { status: 200, body: "{}" });
+  assert.deepEqual(p.commandOutcome({ code: 1, stdout: "", stderr: "gh: Bad credentials (HTTP 401)" }), { status: 401 });
+  assert.deepEqual(p.commandOutcome({ code: 4, stdout: "", stderr: "To get started with GitHub CLI, please run:  gh auth login" }), { status: 401 });
+  assert.deepEqual(p.commandOutcome({ code: 1, stdout: "", stderr: "dial tcp: lookup api.github.com: no such host" }), { failed: true });
+});
+
 test("an account without quota isn't listed", () => {
   const p = provider("grok");
   assert.equal(nextEntry(p, null, p.login(grokLogin), { status: 200, body: "{}" }, NOW), null);

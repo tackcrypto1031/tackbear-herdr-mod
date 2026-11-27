@@ -6,7 +6,7 @@
 // could sign out the agent that owns them; the agents renew them when they run.
 import { View, div, image, svg } from "gpui-kit";
 import { h_flex, v_flex } from "gpui-base";
-import { appHome, exec, home, knownAgents, layout, props, readTextFile, run, settings, setShared, shared, theme } from "herdr";
+import { appHome, exec, home, knownAgents, layout, props, readTextFile, run, settings, setShared, shared, theme, window } from "herdr";
 import { PROVIDERS, busiestPercent, formatDate, formatMoney, formatReset, isBalance, isPastReset, isWaiting, levelOf, nextEntry } from "./model.js";
 
 const POLL_MS = 5 * 60 * 1000;
@@ -50,6 +50,23 @@ async function askHelper(helper) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Runs a provider's CLI, which holds the login and prints the usage reply, so the token never
+ * reaches the mod. A GUI app on macOS may not have the shell's PATH, so a program that can't be
+ * started is tried once more through a login shell. Null when the program isn't there.
+ */
+async function askCommand(provider) {
+  const [program, ...args] = provider.command;
+  let result = await exec(program, args).catch(() => null);
+  if (!result && window()?.platform !== "windows") {
+    const quoted = provider.command.map((arg) => `'${arg.replace(/'/g, "'\\''")}'`).join(" ");
+    result = await exec("/bin/sh", ["-lc", `exec ${quoted}`]).catch(() => null);
+    if (result?.code === 127) result = null;
+  }
+  if (!result) return null;
+  return provider.commandOutcome(result);
 }
 
 export default class Quota extends View {
@@ -107,12 +124,21 @@ export default class Quota extends View {
           if (provider.helper) {
             outcome = await askHelper(provider.helper);
             login = {};
+          } else if (provider.command) {
+            outcome = await askCommand(provider);
+            login = {};
           } else {
             const text = await readTextFile(`${home()}/${provider.loginFile}`).catch(() => null);
             login = text ? provider.login(text) : null;
             if (!login && provider.keychain) {
-              const found = await exec("/usr/bin/security", ["find-generic-password", "-s", provider.keychain, "-w"]).catch(() => null);
-              login = found?.code === 0 ? provider.login(found.stdout.trim()) : null;
+              // Several items can share the service name (one left by an older Claude Code under the
+              // account "unknown"); the one under this user's account holds the current login.
+              const account = home().split("/").pop();
+              for (const only of [["-a", account], []]) {
+                const found = await exec("/usr/bin/security", ["find-generic-password", "-s", provider.keychain, ...only, "-w"]).catch(() => null);
+                login = found?.code === 0 ? provider.login(found.stdout.trim()) : null;
+                if (login) break;
+              }
             }
             if (login) this.askedAt[provider.key] = Date.now();
             outcome = login && await ask(login);
@@ -155,7 +181,7 @@ export default class Quota extends View {
     if (entry.state === "limited") return `${when}查詢太頻繁被限流，${formatDate(entry.retryAt)} 後再查`;
     if (entry.state === "offline") return `${when}${provider.agent} 沒有在執行，開啟後會更新`;
     if (entry.state !== "expired") return `${when}暫時查不到額度`;
-    return provider.helper ? `${when}API 金鑰無效，請在 ${provider.agent} 重新設定` : `${when}登入憑證已過期，開啟 ${provider.agent} 後會更新`;
+    return provider.helper ? `${when}API 金鑰無效，請在 ${provider.agent} 重新設定` : `${when}登入憑證已過期，${provider.relogin ?? `開啟 ${provider.agent}`} 後會更新`;
   }
 
   barColor(t, percent) {
@@ -214,7 +240,7 @@ export default class Quota extends View {
       if (entry.windows.length) return entry.windows.map((w, i) => this.windowRow(t, provider, entry, w, i === 0, now));
       return [h_flex().id(`row-${provider.key}`).h(21).px(16).gap(6).items_center().tooltip(this.whyOld(provider, entry))
         .child(this.nameCell(t, provider, true))
-        .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(entry.state === "limited" ? `限流中，${formatDate(entry.retryAt).slice(6)} 後再查` : entry.state !== "expired" ? "暫時查不到額度" : provider.helper ? "API 金鑰無效" : `開啟 ${provider.agent} 後更新`))];
+        .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(entry.state === "limited" ? `限流中，${formatDate(entry.retryAt).slice(6)} 後再查` : entry.state !== "expired" ? "暫時查不到額度" : provider.helper ? "API 金鑰無效" : `${provider.relogin ?? `開啟 ${provider.agent}`} 後更新`))];
     });
   }
 

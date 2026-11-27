@@ -50,6 +50,19 @@
           ]
         },
         {
+          "id": "quota",
+          "type": "block",
+          "size": {
+            "px": 134
+          },
+          "content": {
+            "mod": "quota",
+            "props": {
+              "fit_block": "quota"
+            }
+          }
+        },
+        {
           "id": "sidebar-footer",
           "type": "block",
           "content": {

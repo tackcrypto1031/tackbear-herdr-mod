@@ -1,6 +1,6 @@
 # Subscription quota
 
-A foldable sidebar section lists how much of each coding-agent subscription you've used. It shows only subscriptions that are installed in Herdr and logged in, and only the time windows each service reports: Claude has a 5-hour and a weekly row (Ultra, formerly Max 20x, only the weekly one), Codex and Grok a weekly row. It also lists what's left on the DeepSeek API account opencode uses.
+A foldable sidebar section lists how much of each coding-agent subscription you've used. It shows only subscriptions that are installed in Herdr and logged in, and only the time windows each service reports: Claude has a 5-hour and a weekly row (Ultra, formerly Max 20x, only the weekly one), Codex and Grok a weekly row, Copilot a monthly row for premium requests. It also lists what's left on the DeepSeek API account opencode uses.
 
 ![Subscription quota](preview-quota.png)
 
@@ -33,22 +33,24 @@ On a sidebar narrower than 160px, the section is a centered chevron, then per su
 
 ## Built from
 
-- **Layout:** a block `{ "id": "quota", "type": "block", "size": { "px": 134 }, "content": { "mod": "quota", "props": { "fit_block": "quota" } } }` in `sidebar`, right before `sidebar-footer`.
+- **Layout:** `layouts/main-chat.json` ships with it: a block `{ "id": "quota", "type": "block", "size": { "px": 134 }, "content": { "mod": "quota", "props": { "fit_block": "quota" } } }` in `sidebar`, right before `sidebar-footer`.
 - **Props:** `fit_block` names the block to resize to the content.
 - **`mod.json`:** `{ "place": "none" }`.
 - **Files:** `main.js` the view and requests, `model.js` pure parsing and formatting, `deepseek-balance.mjs` the DeepSeek helper, `refresh.svg`. DeepSeek's icon is Herdr's `icons/dsh-tui.svg`. It also uses Herdr's `mods/workspace-chrome/chevron-*.svg` and `icons/<agent>.svg`.
-- **`herdr` functions:** `appHome`, `exec`, `home`, `knownAgents`, `layout`, `props`, `readTextFile`, `run`, `settings`, `setShared`, `shared`, `theme`. **Commands:** `layout.resize`. **Globals:** `fetch`, `localStorage`.
+- **`herdr` functions:** `appHome`, `exec`, `home`, `knownAgents`, `layout`, `props`, `readTextFile`, `run`, `settings`, `setShared`, `shared`, `theme`, `window`. **Commands:** `layout.resize`. **Globals:** `fetch`, `localStorage`.
 - **Sources,** one GET each, with the token as `Authorization: Bearer`:
 
 | Agent | Login file | Counts as logged in when | Request | Windows |
 |---|---|---|---|---|
 | `claude` | `~/.claude/.credentials.json` | `claudeAiOauth.accessToken` and `subscriptionType` are set | `https://api.anthropic.com/api/oauth/usage`, header `anthropic-beta: oauth-2025-04-20` | `five_hour`, `seven_day`: `utilization`, `resets_at` |
 | `codex` | `~/.codex/auth.json` | `auth_mode` is `chatgpt` and `tokens.access_token` is set | `https://chatgpt.com/backend-api/wham/usage`, header `ChatGPT-Account-Id` | `rate_limit.primary_window`, `secondary_window`: `used_percent`, `limit_window_seconds`, `reset_at` |
+| `copilot` | none: `gh` keeps the login | `gh api /copilot_internal/user` exits 0. A program that can't start is tried again through `/bin/sh -lc` outside Windows, since a GUI app may lack the shell's PATH. `HTTP 401` or `gh auth login` on stderr counts as expired | run by `gh`, which asks `api.github.com` | `quota_snapshots.premium_interactions`: `100 - percent_remaining`, reset `quota_reset_date_utc`; `unlimited` isn't listed |
 | `grok` | `~/.grok/auth.json` | an entry has `auth_mode: "oidc"` and `key` | `https://cli-chat-proxy.grok.com/v1/billing?format=credits`, header `x-userid` | `config.creditUsagePercent`, `config.currentPeriod` |
 | `deepseek` (shown when `opencode` is installed) | `DEEPSEEK_API_KEY`, else `credential` row `integration_id = 'deepseek'` in `~/.local/share/opencode/opencode.db` (`value.key`), else `deepseek.key` in opencode's `auth.json` | a key is found | `https://api.deepseek.com/user/balance`, run by `node deepseek-balance.mjs`, which prints `{ status, body }`, or `{ login: false }` | `balance_infos[]`: `currency`, `total_balance`; `is_available` |
 
 ## Watch out
 
+- **macOS can hold several `Claude Code-credentials` Keychain items,** one under the account `unknown` from an older Claude Code with no login in it. Ask for the one under the user's account (`-a`) first, then any.
 - **Never refresh a token.** A refresh could sign the agent out. The agents renew their own tokens when they run, and the section recovers on its next request.
 - **A mod can't read SQLite,** and opencode 1.x keeps its keys in `opencode.db`. The helper reads it with `node:sqlite` (Node.js 22.5+), so the key stays out of the mod. Without `node`, the DeepSeek row just isn't listed.
 - **Never store or log a token.** `localStorage` holds only plans, percentages, times and icon paths, and each token goes only to the service that issued it.
@@ -56,7 +58,7 @@ On a sidebar narrower than 160px, the section is a centered chevron, then per su
 - **Some services send more than 3 fractional digits.** Trim them before `Date.parse`.
 - **A copy doesn't start until its block first shows,** so fold inside the mod. Hiding the block with `layout.hide` would stop it from ever coming back after a restart.
 - **Layout `size.height` is scaled by `settings().zoom`:** divide before calling `layout.resize`.
-- **Limits:** the words are Traditional Chinese only. Claude, Codex, Grok, DeepSeek and Antigravity (its desktop app's local language server, a Gemini row and a shared Claude + GPT row) are the only sources; add others to `PROVIDERS` in `model.js`. Tested on Windows 11 with Herdr 0.1.12.
+- **Limits:** the words are Traditional Chinese only. Claude, Codex, Grok, Copilot, DeepSeek and Antigravity (its desktop app's local language server, a Gemini row and a shared Claude + GPT row) are the only sources; add others to `PROVIDERS` in `model.js`. Tested on Windows 11 with Herdr 0.1.12, and on macOS with Herdr 0.9.5.
 
 ## Done when
 

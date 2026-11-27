@@ -30,10 +30,10 @@ A desktop-style message box under your terminals. Type with a real text editor, 
 
 Ask your agent inside Herdr to add this repo, or do it by hand:
 
-1. Copy `mods/chat-box` to `~/.config/herdr-app/mods/`.
-2. Copy `layouts/main-chat.json` to `~/.config/herdr-app/layouts/`.
+1. Copy `mods/chat-box` and `mods/quota` to `~/.config/herdr-app/mods/`.
+2. Copy `layouts/main-chat.json` to `~/.config/herdr-app/layouts/`. It already holds the [quota section](#subscription-quota-separate-optional-mod), so the sidebar shows your quota as soon as the layout is switched to.
 3. Add `"ctrl-shift-j": "chat-box.focus"` to `global` in your `keys.json`, if that key is free.
-4. Run `herdr-app check` on the mod folder, then `herdr-app do layout.switch --name main-chat`.
+4. Run `herdr-app check` on both mod folders, then `herdr-app do layout.switch --name main-chat`.
 
 `Ctrl+Shift+L` switches back to your old layout. Delete the copied files to remove it.
 
@@ -88,12 +88,13 @@ A foldable sidebar section showing how much of each coding-agent subscription yo
 
 ![The quota section, with 5-hour and weekly rows for Claude and weekly rows for Codex and Grok](preview-quota.png)
 
-- Supports Claude, Codex and Grok subscriptions. Claude Ultra (formerly Max 20x) has no 5-hour limit, so it shows only the weekly row.
+- Supports Claude, Codex, Grok and GitHub Copilot subscriptions. Claude Ultra (formerly Max 20x) has no 5-hour limit, so it shows only the weekly row.
+- **GitHub Copilot's monthly premium requests,** asked through the `gh` CLI, so it needs `gh` logged in to the account with the Copilot seat. Unlimited plans aren't listed.
 - **DeepSeek API balance,** for the key opencode uses. A pay-as-you-go API has no quota, so this row shows the money left (`¥10.68`) instead of a bar, and turns red when the account can no longer be used. Listed when opencode is installed and has a DeepSeek key. **Needs Node.js 22.5 or later on your PATH.**
 - **Antigravity model quotas,** read from the Antigravity desktop app while it runs. It has two quotas, so two rows: `Gemini` for the Gemini models and `Claude` for the Claude and GPT models, which share one; hover a row to see which models it covers. When the app is closed the rows dim and keep their last numbers. The `agy` CLI alone isn't enough. **Needs Node.js on your PATH.**
 - Checks every 5 minutes, except while folded (Claude every 15, since its usage reply is rate limited per account; a 429 pauses it for an hour). The refresh icon checks at once.
 - Click the header to fold or open it.
-- **The interface is Traditional Chinese only.** Tested on Windows 11 with Herdr 0.1.12.
+- **The interface is Traditional Chinese only.** Tested on Windows 11 with Herdr 0.1.12, and on macOS with Herdr 0.9.5.
 
 **It reads your agents' login tokens and sends them over the network, unlike the chat box.** Read this before installing:
 
@@ -103,7 +104,8 @@ A foldable sidebar section showing how much of each coding-agent subscription yo
 | `~/.codex/auth.json` | `chatgpt.com` |
 | `~/.grok/auth.json` | `cli-chat-proxy.grok.com` |
 | opencode's DeepSeek key: `DEEPSEEK_API_KEY`, else the `deepseek` row of the `credential` table in `~/.local/share/opencode/opencode.db`, else `deepseek.key` in opencode's older `auth.json` | `api.deepseek.com` |
-| On macOS, when `~/.claude/.credentials.json` is missing: the `Claude Code-credentials` Keychain item | `api.anthropic.com` |
+| On macOS, when `~/.claude/.credentials.json` is missing: the `Claude Code-credentials` Keychain item under your user account, else any item by that name | `api.anthropic.com` |
+| Nothing: Copilot's usage comes from `gh api /copilot_internal/user`, so `gh` keeps its own token | `api.github.com`, by `gh` |
 | The CSRF token on the command line of Antigravity's running `language_server` process | that process, on `127.0.0.1` |
 
 - **The DeepSeek key never reaches the mod.** Herdr mods can't read SQLite, so `mods/quota/deepseek-balance.mjs` runs in `node`, reads the key, asks for the balance and prints only the reply.
@@ -112,7 +114,7 @@ A foldable sidebar section showing how much of each coding-agent subscription yo
 - **When a token expires,** the row dims and keeps its last numbers. Opening that agent renews the token, and the next check recovers.
 - **These usage endpoints aren't public APIs.** A service can change or block them at any time, and using them may not be something it supports. Use this at your own risk.
 
-**Install:** `layouts/main-chat.json` doesn't include this mod, so you add it yourself.
+**Install:** `layouts/main-chat.json` already includes this section, so installing the chat box above installs this too. For another layout:
 
 1. Copy `mods/quota` to `~/.config/herdr-app/mods/`.
 2. In your layout's `sidebar`, add this block right before `sidebar-footer`:
@@ -157,10 +159,10 @@ node --test "test/*.test.mjs"
 
 請 Herdr 裡的代理程式幫你加入這個 repo，或手動安裝：
 
-1. 把 `mods/chat-box` 複製到 `~/.config/herdr-app/mods/`。
-2. 把 `layouts/main-chat.json` 複製到 `~/.config/herdr-app/layouts/`。
+1. 把 `mods/chat-box` 和 `mods/quota` 複製到 `~/.config/herdr-app/mods/`。
+2. 把 `layouts/main-chat.json` 複製到 `~/.config/herdr-app/layouts/`。它已經包含訂閱額度區塊，切換版面後側欄就會顯示額度。
 3. 如果 `ctrl-shift-j` 沒被占用，把 `"ctrl-shift-j": "chat-box.focus"` 加到 `keys.json` 的 `global`。
-4. 對 mod 資料夾執行 `herdr-app check`，再執行 `herdr-app do layout.switch --name main-chat`。
+4. 對兩個 mod 資料夾執行 `herdr-app check`，再執行 `herdr-app do layout.switch --name main-chat`。
 
 要顯示繁體中文介面，請在 `layouts/main-chat.json` 裡 `chat-box` 的 `props` 加上 `"lang": "zh-TW"`。
 
@@ -179,12 +181,13 @@ node --test "test/*.test.mjs"
 
 側欄裡可以收合的區塊，顯示各個程式代理訂閱用了多少額度、何時重置。只會列出已安裝到 Herdr 且已登入的訂閱，也只顯示該服務回報的時段。
 
-- 支援 Claude、Codex、Grok 的訂閱。Claude Ultra（原 Max 20x）沒有 5 小時限制，只顯示週額度。
+- 支援 Claude、Codex、Grok、GitHub Copilot 的訂閱。Claude Ultra（原 Max 20x）沒有 5 小時限制，只顯示週額度。
+- **GitHub Copilot 每月 premium requests**，透過 `gh` 命令列工具查詢，需要 `gh` 已登入有 Copilot 席位的帳號。無上限的方案不會列出。
 - **DeepSeek API 餘額**，用的是 opencode 的金鑰。預付制的 API 沒有額度，所以這一列顯示剩下的錢（`¥10.68`），不畫進度條；帳號不能用時會變紅。有安裝 opencode 且設定了 DeepSeek 金鑰才會列出。**需要 PATH 上有 Node.js 22.5 以上。**
 - **Antigravity 模型額度**，在 Antigravity 桌面版執行時向它讀取。它只有兩份額度，所以兩列：`Gemini` 給 Gemini 模型，`Claude` 給共用一份額度的 Claude 與 GPT 模型，滑鼠移上去會列出包含哪些模型。App 關掉時會變暗並保留上次的數字。只有 `agy` 命令列工具時讀不到。**需要 PATH 上有 Node.js。**
 - 每 5 分鐘查詢一次，收合時不查詢（Claude 每 15 分鐘，因為它的查詢依帳號限流；遇到 429 會暫停一小時）。按重新整理圖示會立刻查詢。
 - 點標題列可以收合或展開。
-- 介面只有繁體中文。已在 Windows 11 和 Herdr 0.1.12 上測試。
+- 介面只有繁體中文。已在 Windows 11 + Herdr 0.1.12，以及 macOS + Herdr 0.9.5 上測試。
 
 **這個 MOD 和訊息框不同，它會讀取代理程式的登入憑證並透過網路送出。** 安裝前請先看過：
 
@@ -194,7 +197,8 @@ node --test "test/*.test.mjs"
 | `~/.codex/auth.json` | `chatgpt.com` |
 | `~/.grok/auth.json` | `cli-chat-proxy.grok.com` |
 | opencode 的 DeepSeek 金鑰：`DEEPSEEK_API_KEY`，其次是 `~/.local/share/opencode/opencode.db` 裡 `credential` 表的 `deepseek` 列，再其次是 opencode 舊版 `auth.json` 的 `deepseek.key` | `api.deepseek.com` |
-| macOS 上沒有 `~/.claude/.credentials.json` 時：鑰匙圈裡的 `Claude Code-credentials` | `api.anthropic.com` |
+| macOS 上沒有 `~/.claude/.credentials.json` 時：鑰匙圈裡你的使用者帳號下的 `Claude Code-credentials`，找不到再用任一同名項目 | `api.anthropic.com` |
+| 不讀：Copilot 的額度由 `gh api /copilot_internal/user` 查詢，憑證留在 `gh` 裡 | `api.github.com`（由 `gh` 送出） |
 | Antigravity 執行中的 `language_server` 程序命令列上的 CSRF token | 該程序本身，`127.0.0.1` |
 
 - **DeepSeek 金鑰不會進到 MOD。** Herdr 的 MOD 讀不了 SQLite，所以由 `mods/quota/deepseek-balance.mjs` 用 `node` 讀金鑰、查餘額，只把回覆交回來。
@@ -203,7 +207,7 @@ node --test "test/*.test.mjs"
 - **憑證過期時，** 那一列會變暗並保留上次的數字。開啟該代理程式會更新憑證，下次查詢就會恢復。
 - **這些查詢端點都不是公開 API。** 服務隨時可能更改或封鎖，也不一定支援這種用法，請自行評估風險。
 
-**安裝：** `layouts/main-chat.json` 沒有包含這個 MOD，需要自己加入。
+**安裝：** `layouts/main-chat.json` 已經包含這個區塊，照上面安裝訊息框時就一起裝好了。使用其他版面時：
 
 1. 把 `mods/quota` 複製到 `~/.config/herdr-app/mods/`。
 2. 在版面的 `sidebar` 裡，把上方英文說明的區塊 JSON 加到 `sidebar-footer` 前面。

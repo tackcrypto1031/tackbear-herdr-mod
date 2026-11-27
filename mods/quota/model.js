@@ -4,6 +4,8 @@
 // `parse` also gets what `login` returned, for plans that change which windows count.
 // A pay-as-you-go API has no quota, only a balance: its entry names a `helper` script that asks
 // for it (the key lives where the mod can't read it), and its windows carry `amount`, not `percent`.
+// A service whose own CLI keeps the login names that CLI as `command`, and `commandOutcome` turns
+// what it printed into `{ status, body }`, so the mod never sees the token.
 
 const WEEK = 604800;
 const FIVE_HOURS = 18000;
@@ -84,6 +86,27 @@ export const PROVIDERS = [
       const part = (w) => w && windowOf(labelOfSeconds(w.limit_window_seconds), w.used_percent, w.reset_at * 1000);
       const limits = reply?.rate_limit;
       return { plan: planName(reply?.plan_type), windows: [part(limits?.primary_window), part(limits?.secondary_window)].filter(Boolean) };
+    },
+  },
+  {
+    key: "copilot",
+    name: "Copilot",
+    agent: "Copilot",
+    // Asked through the gh CLI, which keeps the GitHub login, so the token never reaches the mod.
+    command: ["gh", "api", "/copilot_internal/user"],
+    relogin: "執行 gh auth login",
+    commandOutcome(result) {
+      if (result.code === 0) return { status: 200, body: result.stdout };
+      // gh prints "HTTP 401" for a bad token and "gh auth login" when there's none.
+      return /HTTP 40[13]|gh auth login/.test(result.stderr ?? "") ? { status: 401 } : { failed: true };
+    },
+    parse(reply) {
+      // Premium requests are the only monthly limit; chat and completions are unlimited on paid plans.
+      const premium = reply?.quota_snapshots?.premium_interactions;
+      const plan = planName(reply?.copilot_plan);
+      if (!premium || premium.unlimited || typeof premium.percent_remaining !== "number") return { plan, windows: [] };
+      const resetsAt = toMs(reply.quota_reset_date_utc ?? reply.quota_reset_date);
+      return { plan, windows: [windowOf("月", 100 - premium.percent_remaining, resetsAt)] };
     },
   },
   {
