@@ -125,6 +125,8 @@ A foldable sidebar section showing how much of each coding-agent subscription yo
 
 3. Run `herdr-app check` on the mod folder.
 
+The words are Traditional Chinese; add `"lang": "en"` to its `props` for English.
+
 To remove it, delete the block and the folder. See [RECIPE-quota.md](RECIPE-quota.md) for the full brief.
 
 ## Tests
@@ -212,5 +214,7 @@ node --test "test/*.test.mjs"
 1. 把 `mods/quota` 複製到 `~/.config/herdr-app/mods/`。
 2. 在版面的 `sidebar` 裡，把上方英文說明的區塊 JSON 加到 `sidebar-footer` 前面。
 3. 對 mod 資料夾執行 `herdr-app check`。
+
+介面預設繁體中文；在區塊的 `props` 加上 `"lang": "en"` 改為英文。
 
 要移除時，刪掉該區塊和資料夾即可。

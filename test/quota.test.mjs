@@ -1,7 +1,8 @@
 // Run: node --test "test/*.test.mjs"
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { PROVIDERS, RATE_LIMIT_WAIT_MS, antigravityPools, busiestPercent, formatMoney, formatReset, isPastReset, isWaiting, levelOf, nextEntry } from "../mods/quota/model.js";
+import { PROVIDERS, RATE_LIMIT_WAIT_MS, antigravityPools, busiestPercent, formatMoney, formatReset, isPastReset, isWaiting, levelOf, MISS_GRACE_MS, missedEntry, nextEntry } from "../mods/quota/model.js";
+import { labelText, setLanguage } from "../mods/quota/i18n.js";
 
 const provider = (key) => PROVIDERS.find((p) => p.key === key);
 const NOW = Date.parse("2026-11-04T14:00:00Z");
@@ -221,4 +222,25 @@ test("Antigravity keeps its last numbers while the app is closed", () => {
   assert.deepEqual(nextEntry(p, old, {}, { offline: true }, NOW).windows.map((w) => w.label), ["Gemini", "Claude"]);
   assert.equal(nextEntry(p, null, {}, { offline: true }, NOW), null);
   assert.equal(nextEntry(p, null, {}, { status: 200, body: JSON.stringify({ models: [] }) }, NOW), null);
+});
+
+test("a provider that gives no answer keeps its last numbers, marked old, for a while", () => {
+  const previous = { state: "fresh", plan: null, windows: [{ label: "週", percent: 7, resetsAt: NOW + 1000 }], at: NOW - 1000 };
+  assert.deepEqual(missedEntry(previous, NOW), { ...previous, state: "failed" });
+  assert.equal(missedEntry({ ...previous, state: "expired" }, NOW).state, "expired");
+  assert.equal(missedEntry({ ...previous, at: NOW - MISS_GRACE_MS - 1 }, NOW), null);
+  assert.equal(missedEntry(undefined, NOW), null);
+});
+
+test("props.lang en shows English units and labels", () => {
+  setLanguage("en");
+  try {
+    assert.equal(formatReset(NOW + (5 * 24 + 22) * 60 * 60000, NOW), "5d22h");
+    assert.equal(formatReset(NOW - 1, NOW), "reset");
+    assert.equal(labelText("週"), "Wk");
+    assert.equal(labelText("5H"), "5H");
+  } finally {
+    setLanguage(undefined);
+  }
+  assert.equal(labelText("週"), "週");
 });
